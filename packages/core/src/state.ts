@@ -27,19 +27,26 @@ export class StateStore {
   private constructor(
     private readonly vaultPath: string,
     private readonly data: StateFile,
+    /**
+     * dry-run用: trueの場合、実在のstate.jsonは読み込む（正確な進捗表示のため）が、
+     * 一切ディスクに書き込まない。dry-runの結果が本実行の「作成済み」判定を
+     * 汚染してしまう不具合を防ぐため。
+     */
+    private readonly readOnly: boolean,
   ) {}
 
-  static async load(vaultPath: string, parentPageId: string): Promise<StateStore> {
+  static async load(vaultPath: string, parentPageId: string, opts: { readOnly?: boolean } = {}): Promise<StateStore> {
+    const readOnly = opts.readOnly ?? false;
     const p = statePath(vaultPath);
     try {
       const raw = await fs.readFile(p, 'utf-8');
       const data = JSON.parse(raw) as StateFile;
       data.folders = data.folders ?? {};
-      return new StateStore(vaultPath, data);
+      return new StateStore(vaultPath, data, readOnly);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
       const fresh: StateFile = { version: 1, parentPageId, notes: {}, files: {}, folders: {} };
-      return new StateStore(vaultPath, fresh);
+      return new StateStore(vaultPath, fresh, readOnly);
     }
   }
 
@@ -75,6 +82,7 @@ export class StateStore {
   }
 
   private persist(): Promise<void> {
+    if (this.readOnly) return Promise.resolve();
     this.writeChain = this.writeChain.then(() => this.writeNow());
     return this.writeChain;
   }

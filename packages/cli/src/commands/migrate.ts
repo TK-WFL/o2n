@@ -41,7 +41,7 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   const inventory = await scanVault(vaultPath);
   const client = new NotionClient({ token, dryRun });
   const api = new NotionApi(client);
-  const state = await StateStore.load(vaultPath, plan.parentPageId);
+  const state = await StateStore.load(vaultPath, plan.parentPageId, { readOnly: dryRun });
 
   console.log(dryRun ? '[dry-run] 移行を開始します（書き込みAPIは呼ばれません）' : '移行を開始します');
   const total = inventory.notes.length;

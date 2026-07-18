@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { scanVault } from '../scanner.js';
 import { buildPlan } from '../planner.js';
 import { NotionClient, NotionApi } from '../notion-client.js';
-import { StateStore } from '../state.js';
+import { StateStore, statePath } from '../state.js';
 import { runMigration } from '../migrator.js';
 
 interface CallRecord {
@@ -174,12 +174,37 @@ describe('migrator 3パス統合テスト（モック）', () => {
     const plan = buildPlan(inventory, { parentPageId: 'root-page' });
     const client = new NotionClient({ token: 'test', dryRun: true, fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
     const api = new NotionApi(client);
-    const state = await StateStore.load(tmpDir, 'root-page');
+    const state = await StateStore.load(tmpDir, 'root-page', { readOnly: true });
 
     await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: true });
 
     expect(calls.length).toBe(0);
     expect(client.callCount).toBeGreaterThan(0);
+  });
+
+  it('dry-runはstate.jsonをディスクに書き込まず、後続の本実行の判定を汚染しない（回帰テスト）', async () => {
+    const { fetchImpl, calls } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+
+    // 1. dry-run実行（readOnly: true を渡す、CLI/MCPと同じ使い方）
+    const dryClient = new NotionClient({ token: 'test', dryRun: true, fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const dryApi = new NotionApi(dryClient);
+    const dryState = await StateStore.load(tmpDir, 'root-page', { readOnly: true });
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api: dryApi, state: dryState, dryRun: true });
+
+    // ディスク上のstate.jsonが実際には作成されていないこと
+    await expect(fs.readFile(statePath(tmpDir), 'utf-8')).rejects.toThrow();
+
+    // 2. 本実行: 新しくstate.jsonを読み込んでも「未着手」のはずで、実際にAPIが呼ばれる
+    const realClient = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const realApi = new NotionApi(realClient);
+    const realState = await StateStore.load(tmpDir, 'root-page');
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api: realApi, state: realState, dryRun: false });
+
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/pages')).toBe(true);
+    expect(realState.getNote('Root.md')?.pageId).not.toMatch(/^dry-run/);
+    expect(realState.getNote('Root.md')?.status).toBe('done');
   });
 
   it('resumeは既完了ノートを二重作成しない', async () => {

@@ -115,7 +115,7 @@ server.tool(
         if (!token) throw new Error('NOTION_TOKEN が設定されていません');
         const client = new NotionClient({ token, dryRun });
         const api = new NotionApi(client);
-        const state = await StateStore.load(resolved, plan.parentPageId);
+        const state = await StateStore.load(resolved, plan.parentPageId, { readOnly: dryRun });
         const entries = await runMigration({
           vaultPath: resolved,
           plan,
