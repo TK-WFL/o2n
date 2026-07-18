@@ -428,9 +428,10 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
 
       try {
         const children = await api.getBlockChildren(noteState.pageId);
-        const placeholderBlock = children.results.find(
-          (b) => b.type === 'paragraph' && JSON.stringify(b).includes(file.placeholder),
-        );
+        // §16検証済み（2026-07-19）: 添付プレースホルダーは箇条書き中に書かれることが多く、
+        // Notionはそれを paragraph ではなく bulleted_list_item 等として保存する。
+        // ブロックタイプを限定せず、プレースホルダー文字列を含むブロックを探す。
+        const placeholderBlock = children.results.find((b) => JSON.stringify(b).includes(file.placeholder));
         if (!placeholderBlock) {
           report.push({ category: 'warning', path: note.path, message: `添付プレースホルダーが見つかりませんでした: ${file.placeholder}` });
           continue;

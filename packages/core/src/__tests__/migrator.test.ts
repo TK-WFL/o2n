@@ -120,17 +120,27 @@ function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+/**
+ * 実Notionワークスペースでの検証結果（2026-07-19）を反映: プレースホルダーが
+ * 箇条書き行（"- ..."）にある場合、Notionはparagraphではなくbulleted_list_item
+ * としてブロック化する。テストでもこれを再現し、型を限定した検索の回帰を防ぐ。
+ */
 function extractFileBlocks(markdown: string, pageId: string) {
-  const blocks: Array<{ id: string; type: string; paragraph: { rich_text: Array<{ text: { content: string } }> } }> = [];
+  const blocks: Array<{ id: string; type: string; [key: string]: unknown }> = [];
   const re = /⟦o2n-file-\d+⟧/g;
+  const lines = markdown.split('\n');
   let n = 0;
-  for (const m of markdown.matchAll(re)) {
-    blocks.push({
-      id: `${pageId}-block-${n}`,
-      type: 'paragraph',
-      paragraph: { rich_text: [{ text: { content: m[0] } }] },
-    });
-    n += 1;
+  for (const line of lines) {
+    for (const m of line.matchAll(re)) {
+      const isListItem = /^\s*-\s/.test(line);
+      const type = isListItem ? 'bulleted_list_item' : 'paragraph';
+      blocks.push({
+        id: `${pageId}-block-${n}`,
+        type,
+        [type]: { rich_text: [{ text: { content: m[0] } }] },
+      });
+      n += 1;
+    }
   }
   return blocks;
 }
@@ -174,6 +184,25 @@ describe('migrator 3パス統合テスト（モック）', () => {
     const subState = state.getNote('Sub/Sub Note.md');
     expect(rootState?.status).toBe('done');
     expect(subState?.status).toBe('done');
+  });
+
+  it('箇条書き内の添付（bulleted_list_itemブロック）も正しく解決される（回帰テスト）', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'ListEmbed.md'),
+      '# List Embed\n\n- 画像: ![[pic.png]]\n- リンク: [[Root]]\n',
+    );
+    const { fetchImpl, calls } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+    const state = await StateStore.load(tmpDir, 'root-page');
+
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+
+    expect(state.getNote('ListEmbed.md')?.status).toBe('done');
+    expect(state.getFile('Sub/pic.png')?.status).toBe('attached');
+    expect(calls.some((c) => c.method === 'DELETE' && /\/blocks\//.test(c.path))).toBe(true);
   });
 
   it('429を人工的に発生させてもバックオフして完走する', async () => {
