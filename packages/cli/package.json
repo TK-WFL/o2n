@@ -1,0 +1,36 @@
+{
+  "name": "o2n",
+  "version": "0.1.0",
+  "description": "Obsidian vaultをNotionへ移行するCLI（npx o2n）",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TK-WFL/o2n.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/TK-WFL/o2n#readme",
+  "bugs": "https://github.com/TK-WFL/o2n/issues",
+  "keywords": ["obsidian", "notion", "migration", "cli"],
+  "bin": {
+    "o2n": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/index.js",
+    "prepublishOnly": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@o2n/core": "^0.1.0",
+    "@inquirer/prompts": "^7.2.0",
+    "commander": "^13.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
