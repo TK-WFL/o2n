@@ -383,7 +383,9 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
 
   for (const note of inventory.notes) {
     const noteState = state.getNote(note.path);
-    if (!noteState || noteState.status !== 'linked' || !noteState.pageId) continue;
+    // 'done'も対象に含めるのは、resume時に前回失敗した添付だけを再試行できるようにするため
+    // （一度'done'になったノートをPass3が二度と見に行かないと、失敗した添付が永遠に直らない）
+    if (!noteState || !noteState.pageId || (noteState.status !== 'linked' && noteState.status !== 'done')) continue;
 
     const ctx = buildResolvers(inventory, note.path);
     const reconverted = convertNote(note.content, ctx);
@@ -397,6 +399,8 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       if (!file.targetPath) continue; // 未解決添付はPass1で警告済み
 
       const existingFile = state.getFile(file.targetPath);
+      if (existingFile?.status === 'attached' || existingFile?.status === 'skipped') continue; // resumeで既に完了済み
+
       let fileUploadId = existingFile?.fileUploadId;
 
       if (!fileUploadId || existingFile?.status === 'failed') {

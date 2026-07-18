@@ -20,6 +20,8 @@ function createMockServer() {
   const pageBlocks = new Map<string, Array<{ id: string; type: string; paragraph: { rich_text: Array<{ text: { content: string } }> } }>>();
   let failNextWith429 = false;
   let failNextLinkPatchWith400 = false;
+  let failNextFileSendWith400 = false;
+  let alwaysFailFileSend = false;
 
   const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
     const u = new URL(String(url));
@@ -95,6 +97,10 @@ function createMockServer() {
     }
 
     if (method === 'POST' && /\/file_uploads\/.+\/send$/.test(p)) {
+      if (alwaysFailFileSend || failNextFileSendWith400) {
+        failNextFileSendWith400 = false;
+        return new Response(JSON.stringify({ code: 'validation_error', message: 'content type mismatch' }), { status: 400 });
+      }
       return jsonResponse({ id: 'file-upload-1', status: 'uploaded' });
     }
 
@@ -106,6 +112,7 @@ function createMockServer() {
     calls,
     triggerNext429: () => { failNextWith429 = true; },
     triggerNextLinkPatch400: () => { failNextLinkPatchWith400 = true; },
+    setAlwaysFailFileSend: (v: boolean) => { alwaysFailFileSend = v; },
   };
 }
 
@@ -249,6 +256,31 @@ describe('migrator 3パス統合テスト（モック）', () => {
     expect(secondPageCreateCount).toBe(firstPageCreateCount);
     expect(state2.getNote('Root.md')?.pageId).toBe(afterFirstRun?.pageId);
     expect(state2.getNote('Root.md')?.status).toBe('done');
+  });
+
+  it("ノートがdoneでも、resumeで失敗した添付だけ再試行される（回帰テスト）", async () => {
+    const { fetchImpl, calls, setAlwaysFailFileSend } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, retry: { maxRetries: 1, initialDelayMs: 1, maxDelayMs: 5 }, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+
+    // 1回目: 添付アップロードを常に失敗させる。ノート自体はdoneになる
+    setAlwaysFailFileSend(true);
+    const state1 = await StateStore.load(tmpDir, 'root-page');
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state: state1, dryRun: false });
+
+    expect(state1.getNote('Sub/Sub Note.md')?.status).toBe('done');
+    expect(state1.getFile('Sub/pic.png')?.status).toBe('failed');
+
+    // 2回目: resume。今度はアップロードを成功させる。ノートは既にdoneだが添付が再試行されること
+    setAlwaysFailFileSend(false);
+    const inventory2 = await scanVault(tmpDir);
+    const state2 = await StateStore.load(tmpDir, 'root-page');
+    await runMigration({ vaultPath: tmpDir, plan, inventory: inventory2, api, state: state2, dryRun: false });
+
+    expect(state2.getFile('Sub/pic.png')?.status).toBe('attached');
+    expect(calls.some((c) => c.method === 'POST' && /\/file_uploads\/.+\/send$/.test(c.path))).toBe(true);
   });
 
   it('resumeは既完了ノートを二重作成しない', async () => {
