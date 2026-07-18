@@ -17,7 +17,7 @@ as the single source of truth.
 - **M2 Attachments**: File Upload API (single-part & multipart) + Pass 3 (attachment resolution) ✅
 - **M3 Databases**: automatic database-mode suggestion + database mode + frontmatter property mapping ✅
 - **M4 MCP**: `packages/mcp-server` (stdio, 6 tools) ✅
-- **M5 Release**: English README, npm package metadata (this section) ✅ / actual `npm publish` not yet run
+- **M5 Release**: GitHub published ✅ / npm publish temporarily blocked (see "npm publish status" below)
 - **Report as a Notion page** (part of M5 scope): not implemented yet. The report is currently written only to the local `.o2n/report.md`.
 
 ## Setup (development)
@@ -130,10 +130,19 @@ See [docs/questions.md](docs/questions.md) for details. Highlights:
 - Added a `folders` key to `state.json`, not present in the spec's example schema, to track the
   Notion id of each folder's container (a parent page in page_tree mode, a database in database mode).
 
-## Publishing to npm (maintainer notes — not yet done)
+## npm publish status (maintainer notes)
 
-This repo is publish-ready (`files` entries, `publishConfig`, `prepublishOnly`, LICENSE, etc.) but
-`npm publish` has not actually been run. To publish:
+As of 2026-07-18, v0.1.0 was published once as `@tk_wfl/core`, `@tk_wfl/o2n`, and `@tk_wfl/mcp-server`,
+then unpublished after changing the npm account's email address (for privacy reasons). Because npm
+blocks reusing the same package name for 24 hours after a full unpublish, we tried republishing under
+new names (`@tk_wfl/o2n-core`, `@tk_wfl/o2n-cli`, `@tk_wfl/o2n-mcp-server`) as v0.1.1, but **the npm
+registry is currently rejecting all new-package creation for this account** (`npm publish` consistently
+returns 404, even though token scope/permissions and email verification have all been confirmed fine).
+This is most likely npm's abuse-prevention system flagging the rapid publish/unpublish/rename churn.
+Retrying later, or contacting npm support (support@npmjs.com), should resolve it.
+
+The package itself is publish-ready (`files` entries, `publishConfig`, `prepublishOnly`, LICENSE, etc.).
+To retry:
 
 ```bash
 npm login

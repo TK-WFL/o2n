@@ -16,7 +16,7 @@ frontmatter・添付ファイルを保ったまま移行するツール。
 - **M2 添付**: File Upload API（単発・マルチパート）+ Pass3（添付解決） ✅
 - **M3 DB化**: フォルダのDB化自動提案 + databaseモード + frontmatterマッピング ✅
 - **M4 MCP**: `packages/mcp-server`（stdio、6ツール） ✅
-- **M5 公開**: 英語README・npmパッケージ設定（本README該当セクション） ✅ / 実際の`npm publish`実行は未実施
+- **M5 公開**: GitHub公開 ✅ / npm公開は一時ブロック中（下記「npm公開状況」参照）
 - **レポートのNotionページ化**（M5スコープの一部）: 未実装。現状レポートはローカルの`.o2n/report.md`のみ。
 
 ## セットアップ（開発）
@@ -123,10 +123,19 @@ docs/
 - `state.json`に仕様書の例には無い`folders`キーを追加した（page_treeモードのフォルダ=親ページ、
   databaseモードのフォルダ=DBのID管理に必要なため）。
 
-## npm公開手順（メンテナ向け・未実施）
+## npm公開状況（メンテナ向け）
 
-このリポジトリは公開の準備（`files`指定・`publishConfig`・`prepublishOnly`・LICENSE等）のみ済んでおり、
-実際の`npm publish`はまだ実行していない。公開する場合の手順:
+2026-07-18時点、v0.1.0を`@tk_wfl/core`・`@tk_wfl/o2n`・`@tk_wfl/mcp-server`として一度公開したが、
+npmアカウントのメールアドレス変更（個人情報保護のため）に伴いv0.1.0をunpublishした。npmの仕様上
+「unpublish後24時間は同一パッケージ名を再利用できない」ため、`@tk_wfl/o2n-core`・`@tk_wfl/o2n-cli`・
+`@tk_wfl/o2n-mcp-server`という新しい名前でv0.1.1として再公開を試みたが、**npmレジストリ側が
+このアカウントの新規パッケージ作成を一時的にブロックしている**（`npm publish`が一貫して404を返す。
+トークンのスコープ・権限・メール確認はすべて問題ないことを確認済み）。おそらく短時間での
+publish/unpublish/rename の繰り返しを不正利用防止システムが検知したためと推測される。
+時間を置いて再試行するか、npmサポート（support@npmjs.com）への問い合わせが必要。
+
+公開自体の準備（`files`指定・`publishConfig`・`prepublishOnly`・LICENSE等）は完了している。
+再試行する場合の手順:
 
 ```bash
 npm login
