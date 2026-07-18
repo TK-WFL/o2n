@@ -42,6 +42,29 @@ MCPサーバーは別パッケージ（`@tk_wfl/o2n-mcp-server`）。Claude Desk
 
 ## 使い方（CLI）
 
+### Notionとの連携（2通り）
+
+**方法A: ブラウザでログイン（非エンジニア向け・推奨）**
+
+```bash
+npx @tk_wfl/o2n-cli login
+```
+
+ブラウザが開き、Notionワークスペースを選んで「許可」を押すだけで連携が完了する。
+internal integrationの作成やシークレットのコピペは不要（詳細は後述の「OAuth連携の仕組み」参照）。
+連携解除は`npx @tk_wfl/o2n-cli logout`、現在の連携先確認は`npx @tk_wfl/o2n-cli whoami`。
+
+**方法B: internal integrationトークンを直接指定（エンジニア向け）**
+
+```bash
+export NOTION_TOKEN=secret_xxx
+```
+
+`NOTION_TOKEN`環境変数が設定されていればそちらが優先される。コマンドライン引数では
+受け取らない（シェル履歴への漏洩防止、仕様書§8）。
+
+### コマンド一覧
+
 ```bash
 # 1. vaultを走査（読み取りのみ）
 npx @tk_wfl/o2n-cli scan <vaultPath>
@@ -49,8 +72,7 @@ npx @tk_wfl/o2n-cli scan <vaultPath>
 # 2. 移行計画を対話式に生成（DB化提案の承認などを聞かれる）
 npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionページID>
 
-# 3. 移行実行（NOTION_TOKEN 環境変数が必須。--dry-run でシミュレーションのみ）
-export NOTION_TOKEN=secret_xxx
+# 3. 移行実行（--dry-run でシミュレーションのみ）
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
 
@@ -61,9 +83,6 @@ npx @tk_wfl/o2n-cli resume <vaultPath>
 npx @tk_wfl/o2n-cli verify <vaultPath>
 npx @tk_wfl/o2n-cli report <vaultPath>
 ```
-
-`NOTION_TOKEN` はinternal integrationのシークレット。環境変数でのみ受け取り、
-コマンドライン引数では受け取らない（シェル履歴への漏洩防止、仕様書§8）。
 
 終了コード: `0`=全件成功 / `1`=一部failed / `2`=致命的エラー。
 
@@ -82,14 +101,35 @@ Claude Desktop / Claude Code から `packages/mcp-server/dist/index.js` を stdi
 
 ```
 packages/
-  core/          # scanner / planner / converter / migrator / state / notion / report
+  core/          # scanner / planner / converter / migrator / state / notion / report / credentials
   cli/           # o2n コマンド（coreの薄いラッパー）
   mcp-server/    # stdio MCPサーバー（coreの薄いラッパー）
+services/
+  auth-proxy/    # `o2n login`用のOAuthコード交換代理（Cloudflare Worker、詳細は同ディレクトリのREADME参照）
 fixtures/test-vault/  # 全構文網羅のテスト用vault（fixtures/test-vault/README.md参照）
 docs/
   e2e.md         # 手動E2E手順書
   questions.md   # 実装時の質問・仕様書からの逸脱点一覧
 ```
+
+## `o2n login`（OAuth連携）の仕組み
+
+非エンジニアでも使えるよう、internal integrationのトークン発行・コピペを不要にするOAuthログインを用意している。
+
+- NotionのOAuth（public integration）は`client_secret`が必須でPKCE非対応のため、CLIに`client_secret`を
+  埋め込むことはできない。そこで`services/auth-proxy`（Cloudflare Worker）が`client_secret`を保持し、
+  認可コード→トークンの交換だけを代行する
+- CLIは乱数の`state`を生成し、ブラウザでNotionの認可画面を開く。ユーザーが承認すると、登録済みの
+  Workerの`/callback`にリダイレクトされ、Workerがサーバー側でトークン交換を行い、結果を
+  Cloudflare KVに**最大5分**だけ保存する
+- CLIは`/poll?state=...`を数秒おきにポーリングしてトークンを受け取り、`~/.o2n/credentials.json`
+  （パーミッション600）に保存する。KV上のトークンは1回取得されると即削除される
+- `client_secret`はCLI・MCPサーバー・このリポジトリのどこにも含まれない（Worker環境変数のみ）
+- Worker自体はVaultの内容やNotionページ内容には一切アクセスしない（トークン交換のみを行う）
+
+デプロイ手順は[services/auth-proxy/README.md](services/auth-proxy/README.md)を参照。
+デプロイ前は`packages/cli/src/oauth-config.ts`がプレースホルダーのままのため、`o2n login`は
+エラーメッセージを出して`NOTION_TOKEN`環境変数の利用を案内する（安全側のフォールバック）。
 
 ## §16 未確定事項（2026-07-19 実ワークスペースで検証済み）
 

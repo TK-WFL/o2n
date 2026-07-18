@@ -6,9 +6,31 @@ import { migrateCommand } from './commands/migrate.js';
 import { resumeCommand } from './commands/resume.js';
 import { verifyCommand } from './commands/verify.js';
 import { reportCommand } from './commands/report.js';
+import { loginCommand, logoutCommand, whoamiCommand } from './commands/login.js';
 
 const program = new Command();
 program.name('o2n').description('Obsidian vault を Notion へ移行するツール').version('0.1.0');
+
+program
+  .command('login')
+  .description('ブラウザでNotionと連携する（NOTION_TOKENの手動設定が不要になる）')
+  .action(async () => {
+    process.exitCode = await loginCommand();
+  });
+
+program
+  .command('logout')
+  .description('Notionとの連携を解除する')
+  .action(async () => {
+    process.exitCode = await logoutCommand();
+  });
+
+program
+  .command('whoami')
+  .description('現在連携中のNotionワークスペースを表示する')
+  .action(async () => {
+    process.exitCode = await whoamiCommand();
+  });
 
 program
   .command('scan')

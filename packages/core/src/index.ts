@@ -9,3 +9,4 @@ export * from './planner.js';
 export * from './property-mapping.js';
 export * from './migrator.js';
 export * from './report.js';
+export * from './credentials.js';

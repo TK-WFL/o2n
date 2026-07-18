@@ -43,6 +43,29 @@ The MCP server is a separate package (`@tk_wfl/o2n-mcp-server`). Point Claude De
 
 ## CLI usage
 
+### Connecting to Notion (two ways)
+
+**Option A: browser login (recommended for non-engineers)**
+
+```bash
+npx @tk_wfl/o2n-cli login
+```
+
+Opens a browser, you pick a workspace and click "Allow" — no internal integration or secret
+copy-pasting required. `npx @tk_wfl/o2n-cli logout` disconnects; `whoami` shows the current
+connection. See "How `o2n login` works" below for the security model.
+
+**Option B: internal integration token (for engineers)**
+
+```bash
+export NOTION_TOKEN=secret_xxx
+```
+
+The `NOTION_TOKEN` env var takes priority over a stored login if both are present. It is never
+accepted as a CLI argument (to avoid leaking it into shell history; spec §8).
+
+### Commands
+
 ```bash
 # 1. Scan the vault (read-only)
 npx @tk_wfl/o2n-cli scan <vaultPath>
@@ -50,8 +73,7 @@ npx @tk_wfl/o2n-cli scan <vaultPath>
 # 2. Generate a migration plan interactively (you'll be asked to approve database-mode suggestions)
 npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionPageId>
 
-# 3. Run the migration (NOTION_TOKEN env var required; --dry-run simulates without writing)
-export NOTION_TOKEN=secret_xxx
+# 3. Run the migration (--dry-run simulates without writing)
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
 
@@ -63,10 +85,19 @@ npx @tk_wfl/o2n-cli verify <vaultPath>
 npx @tk_wfl/o2n-cli report <vaultPath>
 ```
 
-`NOTION_TOKEN` is an internal integration secret. It is read only from the environment variable,
-never accepted as a CLI argument (to avoid leaking it into shell history; spec §8).
-
 Exit codes: `0` = fully succeeded, `1` = some notes failed, `2` = fatal error.
+
+## How `o2n login` works
+
+Notion's OAuth (public integration) requires a `client_secret` and doesn't support PKCE, so the
+secret can't be embedded in the open-source CLI. `services/auth-proxy` (a small Cloudflare Worker)
+holds the secret instead and only performs the code→token exchange. The CLI generates a random
+`state`, opens the browser to Notion's authorize screen, and once approved, Notion redirects to the
+Worker's `/callback`, which exchanges the code server-side and stores the result in Cloudflare KV
+for at most 5 minutes. The CLI polls `/poll?state=...` to retrieve it (deleted immediately after
+one successful read) and saves it to `~/.o2n/credentials.json` (mode 600). The `client_secret` never
+touches the CLI, the MCP server, or this repository. See
+[services/auth-proxy/README.md](services/auth-proxy/README.md) for deployment steps.
 
 ## MCP server usage
 

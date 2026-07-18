@@ -37,7 +37,7 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   await fs.mkdir(path.dirname(planCopyPath), { recursive: true });
   await fs.writeFile(planCopyPath, JSON.stringify(plan, null, 2), 'utf-8');
 
-  const token = getToken(dryRun);
+  const token = await getToken(dryRun);
   const inventory = await scanVault(vaultPath);
   const client = new NotionClient({ token, dryRun });
   const api = new NotionApi(client);

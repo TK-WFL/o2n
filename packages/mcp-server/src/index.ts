@@ -14,6 +14,7 @@ import {
   buildReport,
   reportPath,
   statePath,
+  loadCredentials,
   type StateFile,
 } from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
@@ -111,8 +112,8 @@ server.tool(
 
     void (async () => {
       try {
-        const token = process.env.NOTION_TOKEN ?? (dryRun ? 'dry-run-placeholder-token' : '');
-        if (!token) throw new Error('NOTION_TOKEN が設定されていません');
+        const token = process.env.NOTION_TOKEN ?? (await loadCredentials())?.token ?? (dryRun ? 'dry-run-placeholder-token' : '');
+        if (!token) throw new Error('Notionと連携されていません。CLIで `o2n login` を実行するか、NOTION_TOKEN を設定してください。');
         const client = new NotionClient({ token, dryRun });
         const api = new NotionApi(client);
         const state = await StateStore.load(resolved, plan.parentPageId, { readOnly: dryRun });

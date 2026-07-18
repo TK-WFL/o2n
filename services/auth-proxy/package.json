@@ -1,0 +1,17 @@
+{
+  "name": "o2n-auth-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "o2nのCLI/MCPサーバーがNotion OAuth(public integration)のclient_secretを持たずに済むよう、コード交換だけを代行するCloudflare Worker",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^3.90.0"
+  }
+}
