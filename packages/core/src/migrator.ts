@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildNameIndex, resolveByFilename } from './scanner.js';
 import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext } from './converter.js';
-import type { NotionApi, UpdateContentItem } from './notion-client.js';
+import { NotionApiError, type NotionApi, type UpdateContentItem } from './notion-client.js';
 import type { StateStore } from './state.js';
 import { contentHash, isNoteUpToDate } from './state.js';
 import { createDatabaseForFolder, buildRowProperties } from './notion-db.js';
@@ -309,7 +309,27 @@ function mimeTypeFor(filename: string): string {
  * §16検証済み（2026-07-19）: createFileUpload時にcontent_typeを指定しないと、
  * send時にNotionが「作成時に決定された元のcontent typeと一致しない」として400を返す。
  * 作成時とBlobのtypeの両方で同じMIMEタイプを明示する必要がある。
+ * さらに、作成直後（数百ms以内）にsendすると同じ400エラーが発生するケースが実ワークスペースで
+ * 確認された（file_uploadレコードの反映にタイムラグがあると見られる）。sendを1回リトライする
+ * ことで回避する。
  */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function sendWithRetry(api: NotionApi, uploadId: string, buildForm: () => FormData): Promise<void> {
+  try {
+    await api.sendFileUpload(uploadId, buildForm());
+  } catch (err) {
+    if (err instanceof NotionApiError && err.status === 400 && /content type/i.test(err.message)) {
+      await sleep(1000);
+      await api.sendFileUpload(uploadId, buildForm());
+      return;
+    }
+    throw err;
+  }
+}
+
 async function uploadFile(api: NotionApi, absPath: string, size: number, dryRun: boolean): Promise<string> {
   const filename = path.basename(absPath);
   if (dryRun) return `dry-run-upload-${filename}`;
@@ -318,9 +338,11 @@ async function uploadFile(api: NotionApi, absPath: string, size: number, dryRun:
   if (size <= SINGLE_PART_LIMIT) {
     const created = await api.createFileUpload({ filename, content_type: contentType, mode: 'single_part' });
     const buf = await fs.readFile(absPath);
-    const form = new FormData();
-    form.append('file', new Blob([buf], { type: contentType }), filename);
-    await api.sendFileUpload(created.id, form);
+    await sendWithRetry(api, created.id, () => {
+      const form = new FormData();
+      form.append('file', new Blob([buf], { type: contentType }), filename);
+      return form;
+    });
     return created.id;
   }
 
@@ -333,10 +355,12 @@ async function uploadFile(api: NotionApi, absPath: string, size: number, dryRun:
       const partSize = Math.min(SINGLE_PART_LIMIT, size - i * SINGLE_PART_LIMIT);
       const buf = Buffer.alloc(partSize);
       await fh.read(buf, 0, partSize, i * SINGLE_PART_LIMIT);
-      const form = new FormData();
-      form.append('file', new Blob([buf], { type: contentType }), filename);
-      form.append('part_number', String(i + 1));
-      await api.sendFileUpload(created.id, form);
+      await sendWithRetry(api, created.id, () => {
+        const form = new FormData();
+        form.append('file', new Blob([buf], { type: contentType }), filename);
+        form.append('part_number', String(i + 1));
+        return form;
+      });
     }
   } finally {
     await fh.close();
