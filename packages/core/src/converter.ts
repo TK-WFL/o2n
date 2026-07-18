@@ -5,10 +5,12 @@ import type { ConversionResult, ReportEntry } from './types.js';
  * プレースホルダー形式について（仕様書§5 F4からの実装上の変更点）:
  * 仕様書は `⟦o2n:link:リンク先相対パス⟧` という単一の相対パス埋め込み形式を示すが、
  * 同一ノートへのエイリアス違いリンクや見出しリンクなど「表示名がリンクごとに異なるケース」を
- * 表現できないため、本実装では `⟦o2n:link:N⟧` / `⟦o2n:file:N⟧`（Nはノート内の出現順連番）を
+ * 表現できないため、本実装では `⟦o2n-link-N⟧` / `⟦o2n-file-N⟧`（Nはノート内の出現順連番）を
  * プレースホルダーとし、実際のリンク先・表示名は ConversionResult.pendingLinks / pendingFiles に
  * 構造化データとして保持する。Pass 2 はこのNをキーに old_str/new_str を組み立てる。
- * 差分は docs/questions.md に記録済み。
+ * コロンではなくハイフン区切りにしているのは、Notionのenhanced markdownが
+ * old_str検索対象のシリアライズ時にコロンをバックスラッシュエスケープするため
+ * （§16検証済み、2026-07-19）。差分は docs/questions.md に記録済み。
  */
 
 export interface PendingLink {
@@ -30,7 +32,7 @@ export interface PendingFile {
 export interface ConvertNoteResult extends ConversionResult {
   pendingLinks: PendingLink[];
   pendingFiles: PendingFile[];
-  /** 元本文に⟦o2n:が含まれていたためエスケープ復元が必要か */
+  /** 元本文に⟦o2n-が含まれていたためエスケープ復元が必要か */
   needsEscapeRestore: boolean;
 }
 
@@ -50,8 +52,14 @@ const CALLOUT_TYPE_MAP: Record<string, { icon: string; color: string }> = {
 };
 const DEFAULT_CALLOUT = { icon: 'ℹ️', color: 'gray_bg' };
 
-export const ESCAPE_SENTINEL = '⟦o2n-esc:';
-export const ESCAPE_TARGET = '⟦o2n:';
+/**
+ * §16検証済み（2026-07-19）: Notionのenhanced markdownは`old_str`検索の対象となる
+ * 保存済みmarkdownをシリアライズする際、コロン(:)をバックスラッシュエスケープする
+ * （`⟦o2n:link:0⟧` → `⟦o2n\:link\:0⟧`）。これによりPass2の完全一致検索が失敗するため、
+ * プレースホルダーにはコロンを含めず、ハイフンを使う。
+ */
+export const ESCAPE_SENTINEL = '⟦o2n-esc-';
+export const ESCAPE_TARGET = '⟦o2n-';
 
 interface Segment {
   type: 'code' | 'text';
@@ -102,8 +110,9 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
         j += 1;
       }
       const title = (titleText ?? '').trim() || type.charAt(0).toUpperCase() + type.slice(1);
-      const body = bodyLines.join('\n').trim();
-      out.push(`<callout icon="${style.icon}" color="${style.color}">**${title}**${body ? `\n${body}` : ''}</callout>`);
+      // §16検証済み: callout内の改行は\nではなく<br>でないと</callout>の位置がずれて壊れる
+      const body = bodyLines.join('<br>').trim();
+      out.push(`<callout icon="${style.icon}" color="${style.color}">**${title}**${body ? `<br>${body}` : ''}</callout>`);
       i = j;
       continue;
     }
@@ -165,10 +174,10 @@ let linkCounter = 0;
 let fileCounter = 0;
 
 function makeLinkPlaceholder(): string {
-  return `⟦o2n:link:${linkCounter++}⟧`;
+  return `⟦o2n-link-${linkCounter++}⟧`;
 }
 function makeFilePlaceholder(): string {
-  return `⟦o2n:file:${fileCounter++}⟧`;
+  return `⟦o2n-file-${fileCounter++}⟧`;
 }
 
 const WIKILINK_RE = /(!?)\[\[([^\]|#]+)(?:#(\^?[^\]|]+))?(?:\|([^\]]+))?\]\]/g;

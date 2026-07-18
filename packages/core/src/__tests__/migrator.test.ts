@@ -115,7 +115,7 @@ function jsonResponse(data: unknown, status = 200): Response {
 
 function extractFileBlocks(markdown: string, pageId: string) {
   const blocks: Array<{ id: string; type: string; paragraph: { rich_text: Array<{ text: { content: string } }> } }> = [];
-  const re = /⟦o2n:file:\d+⟧/g;
+  const re = /⟦o2n-file-\d+⟧/g;
   let n = 0;
   for (const m of markdown.matchAll(re)) {
     blocks.push({

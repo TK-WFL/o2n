@@ -13,7 +13,7 @@ function ctx(overrides: Partial<ConverterContext> = {}): ConverterContext {
 describe('convertNote §6 変換表', () => {
   it('[[ノート]] はプレースホルダーに変換され pendingLinks に記録される', () => {
     const result = convertNote('[[Note B]]', ctx());
-    expect(result.markdown).toMatch(/⟦o2n:link:0⟧/);
+    expect(result.markdown).toMatch(/⟦o2n-link-0⟧/);
     expect(result.pendingLinks).toHaveLength(1);
     expect(result.pendingLinks[0]?.targetPath).toBe('Target.md');
     expect(result.pendingLinks[0]?.displayText).toBe('Note B');
@@ -37,7 +37,7 @@ describe('convertNote §6 変換表', () => {
 
   it('![[image.png]] は添付プレースホルダーになる', () => {
     const result = convertNote('![[image.png]]', ctx());
-    expect(result.markdown).toMatch(/⟦o2n:file:0⟧/);
+    expect(result.markdown).toMatch(/⟦o2n-file-0⟧/);
     expect(result.pendingFiles).toHaveLength(1);
   });
 
@@ -60,7 +60,7 @@ describe('convertNote §6 変換表', () => {
 
   it('callout(note)を変換する', () => {
     const result = convertNote('> [!note] タイトル\n> 本文行', ctx());
-    expect(result.markdown).toBe('<callout icon="💡" color="blue_bg">**タイトル**\n本文行</callout>');
+    expect(result.markdown).toBe('<callout icon="💡" color="blue_bg">**タイトル**<br>本文行</callout>');
   });
 
   it('callout(warning/tip/info/danger)のicon/colorが正しい', () => {
@@ -134,7 +134,7 @@ describe('convertNote §6 変換表', () => {
   it('相対パス画像 ![alt](assets/img.png) は画像ブロック化される', () => {
     const result = convertNote('![alt](Attachments/image.png)', ctx());
     expect(result.pendingFiles).toHaveLength(1);
-    expect(result.markdown).toMatch(/⟦o2n:file:0⟧/);
+    expect(result.markdown).toMatch(/⟦o2n-file-0⟧/);
   });
 
   it('外部URL画像はそのまま（ダウンロードしない）', () => {
@@ -148,10 +148,10 @@ describe('convertNote §6 変換表', () => {
     expect(result.pendingLinks[0]?.targetPath).toBe('Target.md');
   });
 
-  it('⟦o2n: を含む本文はエスケープされ復元フラグが立つ', () => {
-    const result = convertNote('既存の⟦o2n:something⟧テキスト', ctx());
+  it('⟦o2n- を含む本文はエスケープされ復元フラグが立つ', () => {
+    const result = convertNote('既存の⟦o2n-something⟧テキスト', ctx());
     expect(result.needsEscapeRestore).toBe(true);
-    expect(result.markdown).not.toContain('⟦o2n:something⟧');
+    expect(result.markdown).not.toContain('⟦o2n-something⟧');
   });
 
   it('通常の本文はエスケープ復元不要', () => {

@@ -16,7 +16,9 @@ export function buildFrontmatterMetaCallout(frontmatter: Record<string, unknown>
     const rendered = Array.isArray(v) ? v.join(', ') : typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v);
     return `${k}: ${rendered}`;
   });
-  return `<callout icon="ℹ️" color="gray_bg">${lines.join('\n')}</callout>\n\n`;
+  // §16検証済み（2026-07-19）: callout内の複数行は\nではなく<br>で区切る必要がある。
+  // \nのままだと</callout>が意図しない位置に挿入され、calloutが途中で閉じてしまう。
+  return `<callout icon="ℹ️" color="gray_bg">${lines.join('<br>')}</callout>\n\n`;
 }
 
 function byteLength(s: string): number {
