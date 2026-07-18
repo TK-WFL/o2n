@@ -258,11 +258,18 @@ export class NotionApi {
     });
   }
 
-  async appendBlockChildren(blockId: string, children: unknown[], after?: string): Promise<{ results: Array<{ id: string }> }> {
+  /**
+   * §16検証済み（2026-07-19）: `after`パラメータは廃止済みで指定すると400になる。
+   * 代わりに `position: { type: 'after_block', after_block: { id } }` を使う。
+   */
+  async appendBlockChildren(blockId: string, children: unknown[], afterBlockId?: string): Promise<{ results: Array<{ id: string }> }> {
     return this.client.request({
       method: 'PATCH',
       path: `/blocks/${blockId}/children`,
-      body: { children, ...(after ? { after } : {}) },
+      body: {
+        children,
+        ...(afterBlockId ? { position: { type: 'after_block', after_block: { id: afterBlockId } } } : {}),
+      },
     });
   }
 
