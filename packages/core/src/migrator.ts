@@ -280,22 +280,53 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
 
 const SINGLE_PART_LIMIT = 20 * 1024 * 1024;
 
+const MIME_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  svg: 'image/svg+xml',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  pdf: 'application/pdf',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+  ogg: 'audio/ogg',
+  flac: 'audio/flac',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+  mkv: 'video/x-matroska',
+};
+
+function mimeTypeFor(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  return MIME_TYPES[ext] ?? 'application/octet-stream';
+}
+
+/**
+ * §16検証済み（2026-07-19）: createFileUpload時にcontent_typeを指定しないと、
+ * send時にNotionが「作成時に決定された元のcontent typeと一致しない」として400を返す。
+ * 作成時とBlobのtypeの両方で同じMIMEタイプを明示する必要がある。
+ */
 async function uploadFile(api: NotionApi, absPath: string, size: number, dryRun: boolean): Promise<string> {
   const filename = path.basename(absPath);
   if (dryRun) return `dry-run-upload-${filename}`;
+  const contentType = mimeTypeFor(filename);
 
   if (size <= SINGLE_PART_LIMIT) {
-    const created = await api.createFileUpload({ filename, mode: 'single_part' });
+    const created = await api.createFileUpload({ filename, content_type: contentType, mode: 'single_part' });
     const buf = await fs.readFile(absPath);
     const form = new FormData();
-    form.append('file', new Blob([buf]), filename);
+    form.append('file', new Blob([buf], { type: contentType }), filename);
     await api.sendFileUpload(created.id, form);
     return created.id;
   }
 
   // マルチパート: §4.1 マルチパートアップロード。実ワークスペースでの完了フローは docs/questions.md 参照
   const numberOfParts = Math.ceil(size / SINGLE_PART_LIMIT);
-  const created = await api.createFileUpload({ filename, mode: 'multi_part', number_of_parts: numberOfParts });
+  const created = await api.createFileUpload({ filename, content_type: contentType, mode: 'multi_part', number_of_parts: numberOfParts });
   const fh = await fs.open(absPath, 'r');
   try {
     for (let i = 0; i < numberOfParts; i += 1) {
@@ -303,7 +334,7 @@ async function uploadFile(api: NotionApi, absPath: string, size: number, dryRun:
       const buf = Buffer.alloc(partSize);
       await fh.read(buf, 0, partSize, i * SINGLE_PART_LIMIT);
       const form = new FormData();
-      form.append('file', new Blob([buf]), filename);
+      form.append('file', new Blob([buf], { type: contentType }), filename);
       form.append('part_number', String(i + 1));
       await api.sendFileUpload(created.id, form);
     }
