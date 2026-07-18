@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { scanVault, buildPlan, type MigrationPlan } from '@o2n/core';
+import { scanVault, buildPlan, type MigrationPlan } from '@tk_wfl/core';
 
 function planPath(vaultPath: string): string {
   return path.join(vaultPath, '.o2n', 'plan.json');

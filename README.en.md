@@ -33,34 +33,34 @@ Requires Node.js 20+.
 ## Install (once published to npm)
 
 ```bash
-npx o2n scan <vaultPath>
+npx @tk_wfl/o2n scan <vaultPath>
 # or
-npm install -g o2n
+npm install -g @tk_wfl/o2n
 ```
 
-The MCP server is a separate package (`@o2n/mcp-server`). Point Claude Desktop's config at
-`npx -y @o2n/mcp-server` as the launch command.
+The MCP server is a separate package (`@tk_wfl/mcp-server`). Point Claude Desktop's config at
+`npx -y @tk_wfl/mcp-server` as the launch command.
 
 ## CLI usage
 
 ```bash
 # 1. Scan the vault (read-only)
-npx o2n scan <vaultPath>
+npx @tk_wfl/o2n scan <vaultPath>
 
 # 2. Generate a migration plan interactively (you'll be asked to approve database-mode suggestions)
-npx o2n plan <vaultPath> --parent <NotionPageId>
+npx @tk_wfl/o2n plan <vaultPath> --parent <NotionPageId>
 
 # 3. Run the migration (NOTION_TOKEN env var required; --dry-run simulates without writing)
 export NOTION_TOKEN=secret_xxx
-npx o2n migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
-npx o2n migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
+npx @tk_wfl/o2n migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
+npx @tk_wfl/o2n migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
 
 # 4. Resume an interrupted migration
-npx o2n resume <vaultPath>
+npx @tk_wfl/o2n resume <vaultPath>
 
 # 5. Verify and inspect the report
-npx o2n verify <vaultPath>
-npx o2n report <vaultPath>
+npx @tk_wfl/o2n verify <vaultPath>
+npx @tk_wfl/o2n report <vaultPath>
 ```
 
 `NOTION_TOKEN` is an internal integration secret. It is read only from the environment variable,
@@ -140,14 +140,17 @@ npm login
 npm run build
 npm test
 
-# publish in dependency order: @o2n/core -> o2n (CLI) -> @o2n/mcp-server
+# publish in dependency order: @tk_wfl/core -> @tk_wfl/o2n (CLI) -> @tk_wfl/mcp-server
 npm publish --workspace packages/core
 npm publish --workspace packages/cli
 npm publish --workspace packages/mcp-server
 ```
 
-- The CLI package is published under the unscoped name `o2n` (see `packages/cli/package.json`) so that
-  `npx o2n` works out of the box.
-- `@o2n/core` and `@o2n/mcp-server` are scoped packages, so `publishConfig.access: public` is already set.
+- The CLI was originally meant to be published under the unscoped name `o2n`, but npm's typosquatting
+  protection rejected it as too similar to existing short package names (ol, os, opn, etc.), so it's
+  published as `@tk_wfl/o2n` instead (see `packages/cli/package.json`). Run it via `npx @tk_wfl/o2n`;
+  the underlying bin name is still `o2n`.
+- `@tk_wfl/core`, `@tk_wfl/o2n`, and `@tk_wfl/mcp-server` are all scoped packages, so
+  `publishConfig.access: public` is already set.
 - When bumping versions, keep all three packages in lockstep (the `^0.1.0` dependency range on
-  `@o2n/core` tolerates minor bumps, but bump the major version together on breaking changes).
+  `@tk_wfl/core` tolerates minor bumps, but bump the major version together on breaking changes).

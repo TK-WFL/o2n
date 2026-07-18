@@ -10,7 +10,7 @@ import {
   buildReport,
   type MigrationPlan,
   type ReportEntry,
-} from '@o2n/core';
+} from '@tk_wfl/core';
 import { getToken } from '../token.js';
 
 export interface MigrateCommandOptions {

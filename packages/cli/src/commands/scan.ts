@@ -1,4 +1,4 @@
-import { scanVault } from '@o2n/core';
+import { scanVault } from '@tk_wfl/core';
 
 export async function scanCommand(vaultPath: string, opts: { verbose?: boolean }): Promise<void> {
   const inventory = await scanVault(vaultPath);

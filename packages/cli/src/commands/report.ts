@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs';
-import { reportPath } from '@o2n/core';
+import { reportPath } from '@tk_wfl/core';
 
 export async function reportCommand(vaultPath: string): Promise<number> {
   try {

@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs';
-import { scanVault, statePath, type StateFile } from '@o2n/core';
+import { scanVault, statePath, type StateFile } from '@tk_wfl/core';
 
 export async function verifyCommand(vaultPath: string): Promise<number> {
   let state: StateFile;

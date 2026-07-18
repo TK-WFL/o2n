@@ -1,22 +1,29 @@
 {
-  "name": "@o2n/mcp-server",
+  "name": "@tk_wfl/mcp-server",
   "version": "0.1.0",
   "description": "o2n（Obsidian→Notion移行ツール）のローカルMCPサーバー",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TK-WFL/o2n.git",
+    "url": "git+https://github.com/TK-WFL/o2n.git",
     "directory": "packages/mcp-server"
   },
   "homepage": "https://github.com/TK-WFL/o2n#readme",
   "bugs": "https://github.com/TK-WFL/o2n/issues",
-  "keywords": ["obsidian", "notion", "migration", "mcp"],
+  "keywords": [
+    "obsidian",
+    "notion",
+    "migration",
+    "mcp"
+  ],
   "bin": {
-    "o2n-mcp-server": "./dist/index.js"
+    "o2n-mcp-server": "dist/index.js"
   },
   "main": "./dist/index.js",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -26,7 +33,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@o2n/core": "^0.1.0",
+    "@tk_wfl/core": "^0.1.0",
     "@modelcontextprotocol/sdk": "^1.9.0",
     "zod": "^4.4.3"
   },

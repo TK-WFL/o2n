@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { confirm, input } from '@inquirer/prompts';
-import { scanVault, suggestFolderModes, buildPlan, type FolderPlan } from '@o2n/core';
+import { scanVault, suggestFolderModes, buildPlan, type FolderPlan } from '@tk_wfl/core';
 
 export interface PlanCommandOptions {
   out?: string;

@@ -1,23 +1,30 @@
 {
-  "name": "@o2n/core",
+  "name": "@tk_wfl/core",
   "version": "0.1.0",
   "description": "Obsidian vaultをNotionへ移行するo2nのコアロジック（scanner/converter/migrator/state）",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TK-WFL/o2n.git",
+    "url": "git+https://github.com/TK-WFL/o2n.git",
     "directory": "packages/core"
   },
   "homepage": "https://github.com/TK-WFL/o2n#readme",
   "bugs": "https://github.com/TK-WFL/o2n/issues",
-  "keywords": ["obsidian", "notion", "migration", "markdown"],
+  "keywords": [
+    "obsidian",
+    "notion",
+    "migration",
+    "markdown"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public"
   },
