@@ -3,3 +3,4 @@ dist/
 *.log
 .o2n/
 .DS_Store
+.claude/

@@ -32,34 +32,34 @@ Node.js 20+ が必要。
 ## インストール（npm公開後）
 
 ```bash
-npx @tk_wfl/o2n scan <vaultPath>
+npx @tk_wfl/o2n-cli scan <vaultPath>
 # または
-npm install -g @tk_wfl/o2n
+npm install -g @tk_wfl/o2n-cli
 ```
 
-MCPサーバーは別パッケージ（`@tk_wfl/mcp-server`）。Claude Desktop等の設定で
-`npx -y @tk_wfl/mcp-server` を起動コマンドに指定する。
+MCPサーバーは別パッケージ（`@tk_wfl/o2n-mcp-server`）。Claude Desktop等の設定で
+`npx -y @tk_wfl/o2n-mcp-server` を起動コマンドに指定する。
 
 ## 使い方（CLI）
 
 ```bash
 # 1. vaultを走査（読み取りのみ）
-npx @tk_wfl/o2n scan <vaultPath>
+npx @tk_wfl/o2n-cli scan <vaultPath>
 
 # 2. 移行計画を対話式に生成（DB化提案の承認などを聞かれる）
-npx @tk_wfl/o2n plan <vaultPath> --parent <NotionページID>
+npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionページID>
 
 # 3. 移行実行（NOTION_TOKEN 環境変数が必須。--dry-run でシミュレーションのみ）
 export NOTION_TOKEN=secret_xxx
-npx @tk_wfl/o2n migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
-npx @tk_wfl/o2n migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
+npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
+npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
 
 # 4. 中断からの再開
-npx @tk_wfl/o2n resume <vaultPath>
+npx @tk_wfl/o2n-cli resume <vaultPath>
 
 # 5. 検証・レポート確認
-npx @tk_wfl/o2n verify <vaultPath>
-npx @tk_wfl/o2n report <vaultPath>
+npx @tk_wfl/o2n-cli verify <vaultPath>
+npx @tk_wfl/o2n-cli report <vaultPath>
 ```
 
 `NOTION_TOKEN` はinternal integrationのシークレット。環境変数でのみ受け取り、
@@ -133,16 +133,16 @@ npm login
 npm run build
 npm test
 
-# @tk_wfl/core → @tk_wfl/o2n (CLI) → @tk_wfl/mcp-server の順に依存関係があるため、この順で公開する
+# @tk_wfl/o2n-core → @tk_wfl/o2n-cli (CLI) → @tk_wfl/o2n-mcp-server の順に依存関係があるため、この順で公開する
 npm publish --workspace packages/core
 npm publish --workspace packages/cli
 npm publish --workspace packages/mcp-server
 ```
 
 - CLIパッケージ名は当初unscopedの`o2n`を予定していたが、npmのタイポスクワッティング対策
-  （既存の短い名前（ol, os, opn等）と類似と判定）により拒否されたため、`@tk_wfl/o2n`で公開した
-  （`packages/cli/package.json`）。実行コマンド自体は`npx @tk_wfl/o2n`で、bin名は`o2n`のまま。
-- `@tk_wfl/core`・`@tk_wfl/o2n`・`@tk_wfl/mcp-server`はいずれもscoped packageのため
+  （既存の短い名前（ol, os, opn等）と類似と判定）により拒否されたため、`@tk_wfl/o2n-cli`で公開した
+  （`packages/cli/package.json`）。実行コマンド自体は`npx @tk_wfl/o2n-cli`で、bin名は`o2n`のまま。
+- `@tk_wfl/o2n-core`・`@tk_wfl/o2n-cli`・`@tk_wfl/o2n-mcp-server`はいずれもscoped packageのため
   `publishConfig.access: public`を設定済み。
-- バージョンを上げる場合は3パッケージとも`npm version`で揃えること（`@tk_wfl/core`への依存範囲`^0.1.0`は
+- バージョンを上げる場合は3パッケージとも`npm version`で揃えること（`@tk_wfl/o2n-core`への依存範囲`^0.1.0`は
   そのままでも動くが、破壊的変更時はメジャーを揃えて上げる）。

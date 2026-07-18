@@ -15,7 +15,7 @@ import {
   reportPath,
   statePath,
   type StateFile,
-} from '@tk_wfl/core';
+} from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
 import { getJob, setJob } from './jobs.js';
 
