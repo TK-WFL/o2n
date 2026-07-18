@@ -91,25 +91,36 @@ docs/
   questions.md   # 実装時の質問・仕様書からの逸脱点一覧
 ```
 
-## §16 未確定事項（実ワークスペースでの検証待ち）
+## §16 未確定事項（2026-07-19 実ワークスペースで検証済み）
 
-仕様書§16はNotion API実呼び出しでの検証を求めているが、本セッションではNOTION_TOKEN未提供のため
-実施できていない。仕様書の想定どおりに実装した上で、検証すべき点を以下に記録する。
-検証結果は `docs/e2e.md` の手順を実行後、このセクションに追記すること。
+2026-07-19、実際のNotionワークスペース（`fixtures/test-vault`を対象）に対して`migrate`を実行し、
+以下を検証した。検証中に判明した実装との差分はすべて修正済み（コミット履歴参照）。
 
 1. **enhanced markdownの`markdown`パラメータでfile_upload idを直接参照できるか**
-   → 未検証。実装は仕様書の想定どおりPass 3（添付を子ブロックとして後付け）方式を採用（`packages/core/src/migrator.ts` `runPass3`）。
-     直接参照が可能と判明した場合、Pass 1に統合してPass 3を廃止できる（converter.tsの出力自体は変更不要）。
+   → 未検証のまま（今回のテストvaultの添付ファイルアップロード自体は成功したが、直接参照方式との
+     比較検証はしていない）。Pass 3方式のまま運用している。
 2. **enhanced markdownの数式・ハイライト（背景色）対応範囲**
-   → 未検証。数式(`$...$`/`$$...$$`)はそのまま出力（`converter.ts`は変換しない）。
-     ハイライト`==text==`は仕様書どおり太字へ降格して出力している。Notionが背景色ハイライトを
-     enhanced markdown経由でサポートすると判明すれば、降格をやめて対応構文に置き換えられる。
+   → 未検証のまま。現状どおりハイライトは太字へ降格。
 3. **DB行ページ作成時（parentがdata source）にmarkdownパラメータが使えるか**
-   → 未検証。実装は使える前提（`parent: { data_source_id }` + `markdown`）で`migrator.ts`の`runPass1`を書いている。
-     不可と判明した場合、行本文はブロックAPIでの作成に切り替える必要がある。
+   → ✅ **検証済み・使える**。ただし`parent`に`type: 'data_source_id'`の明示が必須と判明（省略すると
+     `400: body.type should be defined`）。修正済み（`migrator.ts`）。
 4. **`POST /v1/databases` のdata source構造の正確なリクエスト/レスポンス形式**
-   → 未検証。`notion-db.ts`の`createDatabaseForFolder`はレスポンスに`data_sources[0].id`があればそれを、
-     無ければ`id`自体をdata source idとして使う防御的実装にしている。
+   → ✅ **検証済み**。想定と異なっていた点2つを修正:
+     - `parent`に`type: 'page_id'`の明示が必須（省略すると`400: body.parent.type should be defined`）
+     - `properties`はトップレベルではなく`initial_data_source.properties`配下に置く必要がある
+     - レスポンスの data source id は`data_sources[0].id`で取得（想定どおり）
+
+**追加で判明した`PATCH /v1/pages/:id/markdown`の実際のボディ形式**（仕様書には無かった検証事項）:
+想定していた`{ content_updates: [{ type, old_str, new_str, ... }] }`ではなく、
+`{ type: 'update_content', update_content: { content_updates: [{ old_str, new_str, replace_all_matches }] } }`
+という、操作全体を表す`type`をトップレベルに置きネストするラップ構造だった（`insert_content`/`replace_content`も同様）。
+修正済み（`notion-client.ts`の`MarkdownUpdateBody`型）。
+
+**この検証で見つかったバグ2件（修正済み）**:
+- dry-run実行が`state.json`に偽の`pageId`等を書き込んでしまい、直後の本実行がAPIを呼ばずスキップする不具合
+  （`StateStore`に`readOnly`モードを追加して修正）
+- Pass2（リンク解決）が失敗すると該当ノートが`failed`状態になり、resume時にPass1で該当ページを重複作成してしまう不具合
+  （Pass2失敗時は`created`のまま保持するよう修正）
 
 ## 仕様書からの実装上の逸脱点
 

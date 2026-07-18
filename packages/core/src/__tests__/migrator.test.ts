@@ -19,6 +19,7 @@ function createMockServer() {
   let pageCounter = 0;
   const pageBlocks = new Map<string, Array<{ id: string; type: string; paragraph: { rich_text: Array<{ text: { content: string } }> } }>>();
   let failNextWith429 = false;
+  let failNextLinkPatchWith400 = false;
 
   const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
     const u = new URL(String(url));
@@ -41,6 +42,16 @@ function createMockServer() {
         status: 429,
         headers: { 'Retry-After': '0' },
       });
+    }
+
+    if (
+      failNextLinkPatchWith400 &&
+      method === 'PATCH' &&
+      /\/pages\/.+\/markdown$/.test(p) &&
+      (body as { type?: string })?.type === 'update_content'
+    ) {
+      failNextLinkPatchWith400 = false;
+      return new Response(JSON.stringify({ code: 'validation_error', message: 'boom' }), { status: 400 });
     }
 
     if (method === 'GET' && p === '/users/me') {
@@ -90,7 +101,12 @@ function createMockServer() {
     return jsonResponse({});
   }) as typeof fetch;
 
-  return { fetchImpl, calls, triggerNext429: () => { failNextWith429 = true; } };
+  return {
+    fetchImpl,
+    calls,
+    triggerNext429: () => { failNextWith429 = true; },
+    triggerNextLinkPatch400: () => { failNextLinkPatchWith400 = true; },
+  };
 }
 
 function jsonResponse(data: unknown, status = 200): Response {
@@ -205,6 +221,34 @@ describe('migrator 3パス統合テスト（モック）', () => {
     expect(calls.some((c) => c.method === 'POST' && c.path === '/pages')).toBe(true);
     expect(realState.getNote('Root.md')?.pageId).not.toMatch(/^dry-run/);
     expect(realState.getNote('Root.md')?.status).toBe('done');
+  });
+
+  it('Pass2(リンク解決)が失敗してもPass1で作成済みのページを再作成しない（回帰テスト）', async () => {
+    const { fetchImpl, calls, triggerNextLinkPatch400 } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, retry: { maxRetries: 1, initialDelayMs: 1, maxDelayMs: 5 }, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+
+    // 1回目: Root.mdのPass2(リンク解決)を人工的に失敗させる
+    const state1 = await StateStore.load(tmpDir, 'root-page');
+    triggerNextLinkPatch400();
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state: state1, dryRun: false });
+
+    const afterFirstRun = state1.getNote('Root.md');
+    expect(afterFirstRun?.status).not.toBe('failed');
+    expect(afterFirstRun?.pageId).toBeTruthy();
+    const firstPageCreateCount = calls.filter((c) => c.method === 'POST' && c.path === '/pages').length;
+
+    // 2回目: resume。Pass1でRoot.mdのページが再作成されないこと
+    const inventory2 = await scanVault(tmpDir);
+    const state2 = await StateStore.load(tmpDir, 'root-page');
+    await runMigration({ vaultPath: tmpDir, plan, inventory: inventory2, api, state: state2, dryRun: false });
+
+    const secondPageCreateCount = calls.filter((c) => c.method === 'POST' && c.path === '/pages').length;
+    expect(secondPageCreateCount).toBe(firstPageCreateCount);
+    expect(state2.getNote('Root.md')?.pageId).toBe(afterFirstRun?.pageId);
+    expect(state2.getNote('Root.md')?.status).toBe('done');
   });
 
   it('resumeは既完了ノートを二重作成しない', async () => {

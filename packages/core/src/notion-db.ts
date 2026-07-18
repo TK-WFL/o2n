@@ -24,10 +24,10 @@ function propertySchema(type: FrontmatterMapping['notionPropertyType']): Record<
 
 /**
  * §7.2 databaseモード: フォルダをDBとして作成する。
- * §16-4未確定: `POST /v1/databases` の data source 構造の正確な形式は
- * 実ワークスペースでの検証待ち（README参照）。ここでは
- * レスポンスに `data_sources[0].id` があればそれを、無ければ `id` 自体を
- * data source id として扱う防御的実装にしている。
+ * §16-4は実ワークスペースで検証済み（2026-07-19）:
+ * - parentは `{ type: 'page_id', page_id }` と明示的な type が必須（省略すると400）
+ * - properties は `initial_data_source.properties` 配下に置く必要がある（トップレベル不可）
+ * - レスポンスの data source id は `data_sources[0].id` を使う
  */
 export async function createDatabaseForFolder(
   api: NotionApi,
@@ -46,9 +46,9 @@ export async function createDatabaseForFolder(
   }
 
   const res = await api.createDatabase({
-    parent: { page_id: parentPageId },
+    parent: { type: 'page_id', page_id: parentPageId },
     title: [{ type: 'text', text: { content: folderTitle } }],
-    properties,
+    initial_data_source: { properties },
   });
 
   const withDataSources = res as { id: string; data_sources?: Array<{ id: string }> };

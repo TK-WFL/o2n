@@ -182,20 +182,27 @@ export class NotionClient {
 }
 
 export interface CreatePageMarkdownParams {
-  parent: { page_id: string } | { data_source_id: string };
+  parent: { page_id: string } | { type: 'data_source_id'; data_source_id: string };
   markdown?: string;
   properties?: Record<string, unknown>;
 }
 
-export interface ContentUpdate {
-  type: 'update_content' | 'insert_content' | 'replace_content';
-  old_str?: string;
-  new_str?: string;
+export interface UpdateContentItem {
+  old_str: string;
+  new_str: string;
   replace_all_matches?: boolean;
-  position?: 'start' | 'end';
-  after?: string;
-  markdown?: string;
 }
+
+/**
+ * §16-3検証済み（2026-07-19、実ワークスペース）: PATCH .../markdown のボディは
+ * トップレベルに操作全体の `type` を持ち、対応するキー（update_content /
+ * insert_content / replace_content）の中に詳細を入れるネスト構造。
+ * 1回のPATCHで送れる操作は単一の種類のみ（配列で複数種類を混在できない）。
+ */
+export type MarkdownUpdateBody =
+  | { type: 'update_content'; update_content: { content_updates: UpdateContentItem[] } }
+  | { type: 'insert_content'; insert_content: { content: string; position?: { type: 'start' | 'end' }; after?: string } }
+  | { type: 'replace_content'; replace_content: { new_str: string; allow_deleting_content?: boolean } };
 
 /** §4.1のエンドポイントに対応する高レベルAPI */
 export class NotionApi {
@@ -219,14 +226,14 @@ export class NotionApi {
 
   async updatePageMarkdown(
     pageId: string,
-    contentUpdates: ContentUpdate[],
+    body: MarkdownUpdateBody,
     allowAsync = false,
   ): Promise<{ task_id?: string; poll_after_seconds?: number }> {
     return this.client.request({
       method: 'PATCH',
       path: `/pages/${pageId}/markdown`,
       query: allowAsync ? { allow_async: 'true' } : undefined,
-      body: { content_updates: contentUpdates },
+      body,
     });
   }
 

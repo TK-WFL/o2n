@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildNameIndex, resolveByFilename } from './scanner.js';
 import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext } from './converter.js';
-import type { NotionApi, ContentUpdate } from './notion-client.js';
+import type { NotionApi, UpdateContentItem } from './notion-client.js';
 import type { StateStore } from './state.js';
 import { contentHash, isNoteUpToDate } from './state.js';
 import { createDatabaseForFolder, buildRowProperties } from './notion-db.js';
@@ -183,12 +183,12 @@ async function runPass1(
 
     let markdown: string;
     let properties: Record<string, unknown>;
-    let parent: { page_id: string } | { data_source_id: string };
+    let parent: { page_id: string } | { type: 'data_source_id'; data_source_id: string };
 
     if (container.kind === 'database' && container.dataSourceId) {
       markdown = converted.markdown;
       properties = buildRowProperties(note.frontmatter, plan.frontmatterMappings[folder] ?? [], title);
-      parent = { data_source_id: container.dataSourceId };
+      parent = { type: 'data_source_id', data_source_id: container.dataSourceId };
     } else {
       markdown = buildFrontmatterMetaCallout(note.frontmatter) + converted.markdown;
       properties = { title: buildTitleProperty(title) };
@@ -201,7 +201,10 @@ async function runPass1(
       if (dryRun) {
         await api.createPageMarkdown({ parent, markdown: chunks[0], properties });
         for (const chunk of chunks.slice(1)) {
-          await api.updatePageMarkdown('dry-run', [{ type: 'insert_content', position: 'end', markdown: chunk }]);
+          await api.updatePageMarkdown('dry-run', {
+            type: 'insert_content',
+            insert_content: { content: chunk, position: { type: 'end' } },
+          });
         }
         await state.setNote(note.path, {
           status: 'created',
@@ -218,7 +221,7 @@ async function runPass1(
       for (const chunk of chunks.slice(1)) {
         await api.updatePageMarkdown(
           page.id,
-          [{ type: 'insert_content', position: 'end', markdown: chunk }],
+          { type: 'insert_content', insert_content: { content: chunk, position: { type: 'end' } } },
           shouldUseAsyncWrite(chunk),
         );
       }
@@ -243,7 +246,7 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
     const ctx = buildResolvers(inventory, note.path);
     const reconverted = convertNote(note.content, ctx);
 
-    const updates: ContentUpdate[] = [];
+    const updates: UpdateContentItem[] = [];
     for (const link of reconverted.pendingLinks) {
       const targetState = link.targetPath ? state.getNote(link.targetPath) : undefined;
       let newStr: string;
@@ -253,19 +256,22 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
         newStr = link.fallbackText;
         report.push({ category: 'unresolved_link', path: note.path, message: `リンク "${link.fallbackText}" は解決できず元表記に戻しました` });
       }
-      updates.push({ type: 'update_content', old_str: link.placeholder, new_str: newStr, replace_all_matches: true });
+      updates.push({ old_str: link.placeholder, new_str: newStr, replace_all_matches: true });
     }
     if (reconverted.needsEscapeRestore) {
-      updates.push({ type: 'update_content', old_str: ESCAPE_SENTINEL, new_str: ESCAPE_TARGET, replace_all_matches: true });
+      updates.push({ old_str: ESCAPE_SENTINEL, new_str: ESCAPE_TARGET, replace_all_matches: true });
     }
 
     try {
       if (updates.length > 0) {
-        await api.updatePageMarkdown(noteState.pageId, updates);
+        await api.updatePageMarkdown(noteState.pageId, { type: 'update_content', update_content: { content_updates: updates } });
       }
       await state.setNote(note.path, { ...noteState, status: 'linked' });
     } catch (err) {
-      await state.setNote(note.path, { ...noteState, status: 'failed', error: String(err) });
+      // ページ自体は作成済みのため status は 'created' のまま保つ（'failed' にすると
+      // resumeでPass1が再度ページを作成してしまい重複が発生する）。次回resume時に
+      // Pass2が改めてこのノートを処理する。
+      await state.setNote(note.path, { ...noteState, status: 'created', error: String(err) });
       report.push({ category: 'warning', path: note.path, message: `リンク解決に失敗: ${String(err)}` });
     }
     void dryRun;
