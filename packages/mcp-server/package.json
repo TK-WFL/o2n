@@ -1,6 +1,6 @@
 {
   "name": "@tk_wfl/o2n-mcp-server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "o2n（Obsidian→Notion移行ツール）のローカルMCPサーバー",
   "type": "module",
   "license": "MIT",
