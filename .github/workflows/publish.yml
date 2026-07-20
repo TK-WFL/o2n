@@ -1,0 +1,75 @@
+name: Publish npm packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact version already set in all package manifests
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Require an npm CLI with trusted publishing support
+        run: |
+          node -e 'const [major, minor] = process.argv[1].split(".").map(Number); if (major < 11 || (major === 11 && minor < 5)) process.exit(1)' "$(npm --version)"
+          npm --version
+      - run: npm ci
+      - run: npm ci
+        working-directory: services/auth-proxy
+      - run: npm run build --workspace packages/core
+      - run: npm run typecheck
+      - run: npm run typecheck
+        working-directory: services/auth-proxy
+      - run: npm test
+      - run: npm audit
+      - run: npm audit
+        working-directory: services/auth-proxy
+      - name: Build publishable packages in dependency order
+        run: |
+          npm run build --workspace packages/core
+          npm run build --workspace packages/cli
+          npm run build --workspace packages/mcp-server
+      - name: Inspect package versions, dependencies, and tarball contents
+        run: node scripts/verify-release.mjs "$RELEASE_VERSION" --check-registry
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+      - name: Publish core with provenance
+        run: npm publish --workspace packages/core --access public --provenance --ignore-scripts
+      - name: Confirm core is available from npm
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if [ "$(npm view "@tk_wfl/o2n-core@$RELEASE_VERSION" version)" = "$RELEASE_VERSION" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+      - name: Publish core consumers with provenance
+        run: |
+          npm publish --workspace packages/cli --access public --provenance --ignore-scripts
+          npm publish --workspace packages/mcp-server --access public --provenance --ignore-scripts
