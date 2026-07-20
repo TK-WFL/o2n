@@ -78,4 +78,18 @@ describe('credentials local storage', () => {
     ).rejects.toThrow();
     expect(await fs.readFile(outsideKey, 'utf-8')).toBe('attacker-key');
   });
+
+  it.each(['credentials.json', 'state-signing-key'] as const)(
+    'O_NOFOLLOWなしでも%s symlinkの読取りを拒否する',
+    async (fileName) => {
+      const outsideFile = path.join(testRoot, `outside-${fileName}`);
+      await fs.writeFile(outsideFile, 'outside secret');
+      await fs.mkdir(path.join(homePath, '.o2n'), { mode: 0o700 });
+      await fs.symlink(outsideFile, path.join(homePath, '.o2n', fileName));
+
+      await expect(
+        readHomeStateFile(fileName, { noFollowFlag: 0 }),
+      ).rejects.toThrow();
+    },
+  );
 });

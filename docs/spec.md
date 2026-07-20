@@ -59,9 +59,12 @@ old state before resuming a migration created by an older unsafe version.
 ## Security Boundaries
 
 - Vault scanning never follows symlinks.
-- Local state reads use no-follow file opens where supported and verify the opened handle is a
-  regular file. Writes reject symlink destinations and verify canonical vault containment before
-  same-directory atomic replacement.
+- Local state reads use no-follow file opens where supported. On every platform, pre/post-open
+  `lstat` metadata must match the opened handle's device, inode, and file type, and the parent
+  directory identity is revalidated before content is returned.
+- Writes reject symlink destinations and verify canonical containment before same-directory atomic
+  replacement. Custom plan output creates missing parent segments one at a time from a verified
+  existing ancestor and rejects symlink ancestors.
 - MCP requires `O2N_ALLOWED_VAULTS` and compares `realpath()` values exactly.
 - MCP real writes require `O2N_ENABLE_MCP_WRITE=1` and a matching `O2N_MCP_WRITE_TOKEN`.
 - `start_migration` is disabled; use `prepare_migration` and `commit_migration`.
@@ -82,3 +85,4 @@ OAuth code exchange only and does not read vault contents.
 - Hardened MCP path and write boundaries.
 - Prevented `.o2n` and user-home credential symlinks from reading or overwriting arbitrary files,
   and stopped automatic plan creation for errors other than a missing `plan.json`.
+- Added no-follow fallback identity checks and safe recursive parent creation for custom plan output.

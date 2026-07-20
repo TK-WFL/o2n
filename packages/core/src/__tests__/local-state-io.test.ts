@@ -3,7 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  atomicWriteRegularFileNoFollow,
   atomicWriteVaultStateFile,
+  readRegularFileNoFollow,
   readVaultStateFile,
 } from '../local-state-io.js';
 
@@ -29,6 +31,20 @@ describe('vault local state I/O', () => {
 
     await expect(readVaultStateFile(vaultPath, 'report.md')).rejects.toThrow();
   });
+
+  it.each(['plan.json', 'report.md', 'state.json'] as const)(
+    'O_NOFOLLOWなしでも%s symlinkの読取りを拒否する',
+    async (fileName) => {
+      const outsideFile = path.join(testRoot, `outside-${fileName}`);
+      await fs.writeFile(outsideFile, 'outside secret');
+      await fs.mkdir(path.join(vaultPath, '.o2n'));
+      await fs.symlink(outsideFile, path.join(vaultPath, '.o2n', fileName));
+
+      await expect(
+        readVaultStateFile(vaultPath, fileName, { noFollowFlag: 0 }),
+      ).rejects.toThrow();
+    },
+  );
 
   it('plan.json symlinkを拒否し、リンク先を上書きしない', async () => {
     const outsidePlan = path.join(testRoot, 'outside-plan.json');
@@ -65,5 +81,50 @@ describe('vault local state I/O', () => {
     const fileStat = await fs.stat(path.join(vaultPath, '.o2n', 'state.json'));
     expect(directoryStat.mode & 0o777).toBe(0o700);
     expect(fileStat.mode & 0o777).toBe(0o600);
+  });
+
+  it('O_NOFOLLOWなしでも任意plan pathのsymlink読取りを拒否する', async () => {
+    const outsidePlan = path.join(testRoot, 'outside-custom-plan.json');
+    const planLink = path.join(testRoot, 'custom-plan.json');
+    await fs.writeFile(outsidePlan, '{"secret":true}');
+    await fs.symlink(outsidePlan, planLink);
+
+    await expect(
+      readRegularFileNoFollow(planLink, { noFollowFlag: 0 }),
+    ).rejects.toThrow();
+  });
+
+  it('custom outputの不足した親ディレクトリを安全に再帰作成する', async () => {
+    const outputPath = path.join(testRoot, 'new', 'nested', 'plan.json');
+
+    await atomicWriteRegularFileNoFollow(outputPath, '{"version":1}');
+
+    expect(await fs.readFile(outputPath, 'utf-8')).toBe('{"version":1}');
+  });
+
+  it('相対custom outputでも不足した親ディレクトリを再帰作成する', async () => {
+    const outputPath = path.join(testRoot, 'relative', 'nested', 'plan.json');
+    const relativeOutputPath = path.relative(process.cwd(), outputPath);
+
+    await atomicWriteRegularFileNoFollow(relativeOutputPath, '{"version":1}');
+
+    expect(await fs.readFile(outputPath, 'utf-8')).toBe('{"version":1}');
+  });
+
+  it('custom outputの既存symlink祖先を拒否する', async () => {
+    const outsideDirectory = path.join(testRoot, 'outside-output');
+    const linkedAncestor = path.join(testRoot, 'linked-output');
+    await fs.mkdir(outsideDirectory);
+    await fs.symlink(outsideDirectory, linkedAncestor);
+
+    await expect(
+      atomicWriteRegularFileNoFollow(
+        path.join(linkedAncestor, 'nested', 'plan.json'),
+        '{"version":1}',
+      ),
+    ).rejects.toThrow();
+    await expect(
+      fs.lstat(path.join(outsideDirectory, 'nested', 'plan.json')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
