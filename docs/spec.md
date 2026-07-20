@@ -71,6 +71,8 @@ old state before resuming a migration created by an older unsafe version.
   missing segments one at a time, and rejects symlink ancestors even when deeper directories exist.
 - Atomic writes verify the temporary path and opened handle have the same single-link inode before
   writing, then verify the renamed destination still has that inode before reporting success.
+  Temporary and destination files must retain the requested `0600` mode for vault, custom-plan,
+  and home-secret writes, regardless of whether an owner check applies.
   Validation failures do not unlink by pathname, avoiding removal of an attacker-replaced inode;
   an untrusted or incomplete temporary file may remain for manual cleanup.
 - MCP requires `O2N_ALLOWED_VAULTS` and compares `realpath()` values exactly.
@@ -98,3 +100,4 @@ OAuth code exchange only and does not read vault contents.
 - Bound atomic temporary and destination names to one verified inode and hardened home-secret
   ownership, permission, and hard-link requirements.
 - Extended explicit plan reads to validate the complete parent ancestry.
+- Enforced atomic file modes for vault and custom-plan writes as well as home secrets.

@@ -272,4 +272,46 @@ describe('vault local state I/O', () => {
 
     expect(await fs.readFile(hardlinkPath, 'utf-8')).toBe('');
   });
+
+  it('owner検証なしでも0644 tempを拒否して書き込まない', async () => {
+    let temporaryPath = '';
+
+    await expect(
+      atomicWriteVaultStateFile(vaultPath, 'report.md', 'secret report', {
+        testHooks: {
+          beforeTemporaryValidation: async (context) => {
+            temporaryPath = context.temporaryPath;
+            await fs.chmod(temporaryPath, 0o644);
+          },
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect(await fs.readFile(temporaryPath, 'utf-8')).toBe('');
+  });
+
+  it('owner検証なしでもrename後destinationが0644なら成功扱いしない', async () => {
+    let destinationPath = '';
+
+    await expect(
+      atomicWriteVaultStateFile(vaultPath, 'report.md', 'secret report', {
+        testHooks: {
+          afterRename: async (context) => {
+            destinationPath = context.destinationPath;
+            await fs.chmod(destinationPath, 0o644);
+          },
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect((await fs.stat(destinationPath)).mode & 0o777).toBe(0o644);
+  });
+
+  it('owner検証なしのvault atomic writeでも0600を許可する', async () => {
+    await atomicWriteVaultStateFile(vaultPath, 'report.md', 'safe report');
+
+    const destinationPath = path.join(vaultPath, '.o2n', 'report.md');
+    expect((await fs.stat(destinationPath)).mode & 0o777).toBe(0o600);
+    expect(await fs.readFile(destinationPath, 'utf-8')).toBe('safe report');
+  });
 });

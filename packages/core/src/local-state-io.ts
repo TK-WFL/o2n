@@ -49,6 +49,7 @@ export interface AtomicWriteTestContext {
 export interface AtomicWriteOptions {
   testHooks?: {
     afterTemporaryOpen?: (context: AtomicWriteTestContext) => Promise<void>;
+    beforeTemporaryValidation?: (context: AtomicWriteTestContext) => Promise<void>;
     afterRename?: (context: AtomicWriteTestContext) => Promise<void>;
   };
 }
@@ -367,10 +368,14 @@ function assertAtomicFilePolicy(
   stat: Stats,
   mode: number,
 ): void {
-  if (directory.ownerUid === undefined) return;
-  assertSecureOwner(targetPath, stat, directory.ownerUid);
+  if (!stat.isFile() || stat.nlink !== 1) {
+    throw securityError(targetPath, '単一リンクの通常ファイルではありません');
+  }
+  if (directory.ownerUid !== undefined) {
+    assertSecureOwner(targetPath, stat, directory.ownerUid);
+  }
   if ((stat.mode & 0o777) !== mode) {
-    throw securityError(targetPath, '秘密ファイルの権限が要求値と一致しません');
+    throw securityError(targetPath, 'atomicファイルの権限が要求値と一致しません');
   }
 }
 
@@ -429,6 +434,7 @@ async function atomicWriteToDirectory(
   try {
     await options.testHooks?.afterTemporaryOpen?.(hookContext);
     await handle.chmod(mode);
+    await options.testHooks?.beforeTemporaryValidation?.(hookContext);
     const opened = await handle.stat();
     temporaryIdentity = opened;
     const atPath = await fs.lstat(temporary);
