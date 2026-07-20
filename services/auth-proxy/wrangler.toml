@@ -13,7 +13,7 @@ class_name = "OAuthSessions"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["OAuthSessions"]
+new_sqlite_classes = ["OAuthSessions"]
 
 # 秘密情報は `wrangler secret put NOTION_CLIENT_SECRET` で設定する（このファイルには書かない）
 [vars]
