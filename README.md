@@ -110,9 +110,12 @@ packages/
 services/
   auth-proxy/    # `o2n login`用のOAuthコード交換代理（Cloudflare Worker）
 fixtures/test-vault/  # 全構文網羅のテスト用vault
+scripts/
+  verify-release.mjs  # npm公開前の内容・チェックサム検証
 docs/
   e2e.md         # 手動E2E手順書
   questions.md   # 実装判断の記録
+  spec.md        # セキュリティ境界・永続化データの仕様
 ```
 
 ## `o2n login`（OAuth連携）の仕組み
@@ -146,6 +149,7 @@ npm test
 - `.o2n/state.json` はstate v2としてcanonical vault、plan hash、Notion識別子、ローカル署名で結合される
 - Vaultへの書き込みは`.o2n/`ディレクトリのみ（Vault本体は読み取り専用）
 - Vault内のシンボリックリンクは辿らない（vault外ファイルへのアクセス防止）
+- `.o2n/`配下と`~/.o2n/`配下のファイルはsymlink・hardlink・TOCTOU（検証後の差し替え）攻撃を防ぐ形で読み書きされ、`0700`/`0600`パーミッションに保たれる
 - MCPサーバーは`realpath()`済みのvaultが`O2N_ALLOWED_VAULTS`に含まれる場合のみ読み書きする
 - Notion API以外への通信は行わない（テレメトリなし）
 

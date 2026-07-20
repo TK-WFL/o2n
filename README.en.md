@@ -111,9 +111,12 @@ packages/
 services/
   auth-proxy/    # OAuth code-exchange proxy for `o2n login` (Cloudflare Worker)
 fixtures/test-vault/  # test vault covering every supported syntax
+scripts/
+  verify-release.mjs  # pre-publish npm package content/checksum verification
 docs/
   e2e.md         # manual end-to-end test procedure
   questions.md   # implementation decision log
+  spec.md        # security boundaries and persisted-data spec
 ```
 
 ## How `o2n login` works
@@ -151,6 +154,8 @@ See [docs/questions.md](docs/questions.md) for implementation decisions and devi
   local signature.
 - The only path o2n writes to inside the vault is `.o2n/` (the vault itself is read-only)
 - Symbolic links inside the vault are never followed (prevents reading files outside the vault)
+- Files under `.o2n/` and `~/.o2n/` are read and written with symlink, hardlink, and TOCTOU
+  (swap-after-verify) protections, and kept at `0700`/`0600` permissions
 - The MCP server only reads/writes vaults whose canonical `realpath()` is listed in
   `O2N_ALLOWED_VAULTS`
 - No network calls other than to the Notion API (no telemetry)
