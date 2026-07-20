@@ -81,10 +81,9 @@ describe('convertNote §6 変換表', () => {
     expect(convertNote(md, ctx()).markdown).toBe(md);
   });
 
-  it('==ハイライト== は太字に降格されレポートされる', () => {
+  it('==ハイライト== はネイティブハイライト(span color)に変換される', () => {
     const result = convertNote('==重要==', ctx());
-    expect(result.markdown).toBe('**重要**');
-    expect(result.entries.some((e) => e.category === 'downgraded' && e.message.includes('ハイライト'))).toBe(true);
+    expect(result.markdown).toBe('<span color="yellow_bg">重要</span>');
   });
 
   it('%%コメント%% は削除されレポートされる', () => {

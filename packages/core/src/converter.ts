@@ -122,15 +122,14 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
   return out.join('\n');
 }
 
-function convertHighlights(text: string, entries: ReportEntry[], sourcePath: string): string {
-  return text.replace(/==([^=\n]+)==/g, (_m, inner) => {
-    entries.push({
-      category: 'downgraded',
-      path: sourcePath,
-      message: `ハイライト "==${inner}==" を太字に降格しました`,
-    });
-    return `**${inner}**`;
-  });
+/**
+ * §16検証済み（2026-07-19、実ワークスペース）: enhanced markdownの`<span color="yellow_bg">text</span>`は
+ * 本物のハイライト（rich_textのcolor annotation）として保存されることを確認した。
+ * 太字への降格は不要な情報劣化だったため、ネイティブハイライトに変換する（黄色をデフォルトに使用。
+ * Obsidianの`==text==`自体は色を指定しないため）。
+ */
+function convertHighlights(text: string): string {
+  return text.replace(/==([^=\n]+)==/g, (_m, inner) => `<span color="yellow_bg">${inner}</span>`);
 }
 
 function stripComments(text: string, entries: ReportEntry[], sourcePath: string): string {
@@ -325,7 +324,7 @@ export function convertNote(content: string, ctx: ConverterContext): ConvertNote
     t = convertCallouts(t, entries, ctx.sourcePath);
     t = convertWikiLinks(t, ctx, entries, pendingLinks, pendingFiles);
     t = convertMarkdownLinksAndImages(t, ctx, entries, pendingLinks, pendingFiles);
-    t = convertHighlights(t, entries, ctx.sourcePath);
+    t = convertHighlights(t);
     t = stripComments(t, entries, ctx.sourcePath);
     t = expandFootnotes(t, entries, ctx.sourcePath);
     return t;
