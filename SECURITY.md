@@ -48,5 +48,6 @@ These settings cannot be enforced by a pull request. Repository administrators m
 1. Set the same new version in core, CLI, and MCP package manifests. CLI and MCP must depend on `@tk_wfl/o2n-core` at `^<same version>`, and the lockfile must match.
 2. Merge the version change to `main`; never publish from a dirty local checkout.
 3. Dispatch **Publish npm packages** from `main` with that exact version and approve the protected `npm-publish` environment.
-4. The workflow installs from lockfiles, runs type checks, tests, full audits, clean builds, tarball inspection, and registry collision checks before publishing with OIDC provenance.
-5. It publishes core first, confirms that version is visible on npm, then publishes CLI and MCP. If a later publish fails, do not blindly rerun: inspect npm provenance and package contents before deciding how to recover.
+4. The unprivileged verification job installs from lockfiles, runs type checks, tests, full audits, clean builds, tarball inspection, and registry collision checks. It passes only fixed-name, checksummed tarballs through an immutable Actions artifact.
+5. After environment approval, the OIDC-enabled job checks out no repository code and publishes only those verified tarballs with provenance. It publishes core first, confirms that version is visible on npm, then publishes CLI and MCP.
+6. If a later publish fails, do not blindly rerun: inspect npm provenance and package contents before deciding how to recover.
