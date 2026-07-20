@@ -27,17 +27,7 @@ Requires Node.js 20+.
 
 ### Connecting to Notion (two ways)
 
-**Option A: browser login (recommended)**
-
-```bash
-npx @tk_wfl/o2n-cli login
-```
-
-Opens a browser, you pick a workspace and click "Allow" — no internal integration or secret
-copy-pasting required (see "How `o2n login` works" below). `logout` disconnects; `whoami` shows
-the current connection.
-
-**Option B: internal integration token**
+**Option A: internal integration token (recommended)**
 
 ```bash
 export NOTION_TOKEN=secret_xxx
@@ -45,6 +35,16 @@ export NOTION_TOKEN=secret_xxx
 
 The `NOTION_TOKEN` env var takes priority over a stored login if both are present. It is never
 accepted as a CLI argument (to avoid leaking it into shell history).
+
+**Option B: browser login (disabled by default)**
+
+```bash
+npx @tk_wfl/o2n-cli login
+```
+
+Browser login is disabled by default because the old OAuth polling flow allowed token theft.
+Only set `O2N_ENABLE_BROWSER_LOGIN=1` when you are intentionally testing the new loopback handoff
+flow. If you used `o2n login` with an older version, revoke and re-issue the Notion token.
 
 ### Commands
 
@@ -72,9 +72,12 @@ Exit codes: `0` = fully succeeded, `1` = some notes failed, `2` = fatal error.
 ## MCP server usage
 
 Register `@tk_wfl/o2n-mcp-server` as a stdio MCP server in Claude Desktop / Claude Code.
-Tools: `scan_vault` / `get_plan` / `update_plan` / `start_migration` / `migration_status` / `get_report`.
+Tools: `scan_vault` / `get_plan` / `update_plan` / `prepare_migration` / `commit_migration` / `migration_status` / `get_report`.
 
-`start_migration` is only invoked after explicit user confirmation (stated in the tool's description).
+MCP access requires `O2N_ALLOWED_VAULTS=/absolute/path/to/vault` (comma-separated for multiple
+vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
+`O2N_MCP_WRITE_TOKEN`, inspect `prepare_migration`, then pass the confirmation token to
+`commit_migration`. `start_migration` is disabled for safety.
 
 ## What gets converted
 
@@ -114,10 +117,10 @@ docs/
 - Notion's OAuth (public integration) requires a `client_secret`, which can't be embedded in the
   CLI. Instead, `services/auth-proxy` (a small Cloudflare Worker) holds the secret and only
   performs the code→token exchange.
-- The CLI opens the browser to Notion's authorize screen; once approved, the Worker exchanges the
-  code server-side and stores the result in Cloudflare KV for at most 5 minutes. The CLI polls for
-  it and saves it to `~/.o2n/credentials.json` (mode 600). The KV entry is deleted immediately
-  after one successful read.
+- The old polling flow is disabled. The new flow opens a temporary listener on `127.0.0.1`; the
+  Worker exchanges the authorization code, redirects only a short-lived handoff code to loopback,
+  and the CLI exchanges that code plus a local session secret for the token exactly once. The token
+  is saved to `~/.o2n/credentials.json` (mode 600).
 - The `client_secret` never touches the CLI, the MCP server, or this repository (Worker
   environment variable only).
 - The Worker only performs the token exchange — it never accesses vault contents or Notion pages.
@@ -138,23 +141,18 @@ See [docs/questions.md](docs/questions.md) for implementation decisions and devi
 
 - The Notion token is stored only in the `NOTION_TOKEN` env var or `~/.o2n/credentials.json`
   (via `o2n login`, mode 600)
-- Writes are scoped to the specified parent page only
+- Only YAML frontmatter is supported. Non-YAML frontmatter such as `---js`, `---javascript`, and
+  `---json` is rejected before parsing.
+- `.o2n/state.json` v2 is bound to the canonical vault path, plan hash, Notion identity, and a
+  local signature.
 - The only path o2n writes to inside the vault is `.o2n/` (the vault itself is read-only)
 - Symbolic links inside the vault are never followed (prevents reading files outside the vault)
-- The MCP server verifies that a given `vaultPath` actually looks like an Obsidian vault (has a
-  `.obsidian` directory) before reading or writing anything, to guard against an AI agent being
-  pointed at an unintended path
+- The MCP server only reads/writes vaults whose canonical `realpath()` is listed in
+  `O2N_ALLOWED_VAULTS`
 - No network calls other than to the Notion API (no telemetry)
 
 ### Trust model for `o2n login` (shared auth-proxy)
 
-By default, `o2n login` goes through a Cloudflare Worker operated by TK-WFL
-(`o2n-auth-proxy.workflow-lab.workers.dev`) to handle Notion's `client_secret`. This Worker only
-performs the code→token exchange and never accesses vault contents or Notion pages, but using it
-does require trusting its operator. The polling parameter (`pollSecret`) is only ever matched via
-a one-way sha256 hash, and the token is deleted from KV immediately after one successful read, so
-a value leaked through browser history or logs alone cannot be used to steal the token. If your
-security requirements call for it, self-host `services/auth-proxy` on your own Cloudflare account
-and point `packages/cli/src/oauth-config.ts` at it instead (see
-[services/auth-proxy/README.md](services/auth-proxy/README.md)). The `NOTION_TOKEN` env var path
-(internal integration) does not depend on this trust model at all.
+`o2n login` is disabled by default. If you enable it, the TK-WFL-operated or self-hosted
+Cloudflare Worker handles Notion's `client_secret`, so you must trust that Worker operator. The
+`NOTION_TOKEN` env var path (internal integration) does not depend on this trust model at all.

@@ -27,17 +27,7 @@ Node.js 20+ が必要。
 
 ### Notionとの連携（2通り）
 
-**方法A: ブラウザでログイン（推奨）**
-
-```bash
-npx @tk_wfl/o2n-cli login
-```
-
-ブラウザが開き、Notionワークスペースを選んで「許可」を押すだけで連携が完了する。
-internal integrationの作成やシークレットのコピペは不要（仕組みは後述）。
-連携解除は`logout`、現在の連携先確認は`whoami`。
-
-**方法B: internal integrationトークンを直接指定**
+**方法A: internal integrationトークンを直接指定（推奨）**
 
 ```bash
 export NOTION_TOKEN=secret_xxx
@@ -45,6 +35,16 @@ export NOTION_TOKEN=secret_xxx
 
 `NOTION_TOKEN`環境変数が設定されていればそちらが優先される。コマンドライン引数では
 受け取らない（シェル履歴への漏洩防止）。
+
+**方法B: ブラウザでログイン（既定停止中）**
+
+```bash
+npx @tk_wfl/o2n-cli login
+```
+
+旧OAuth poll方式にトークン窃取リスクが見つかったため、ブラウザログインは既定で停止している。
+検証目的で新しいloopback handoff方式を使う場合のみ、`O2N_ENABLE_BROWSER_LOGIN=1` を明示する。
+旧バージョンで `o2n login` を利用した場合は、Notion側で該当トークンを失効・再発行することを推奨する。
 
 ### コマンド一覧
 
@@ -72,9 +72,12 @@ npx @tk_wfl/o2n-cli report <vaultPath>
 ## 使い方（MCPサーバー）
 
 Claude Desktop / Claude Code から `@tk_wfl/o2n-mcp-server` を stdio MCP サーバーとして登録する。
-ツール: `scan_vault` / `get_plan` / `update_plan` / `start_migration` / `migration_status` / `get_report`。
+ツール: `scan_vault` / `get_plan` / `update_plan` / `prepare_migration` / `commit_migration` / `migration_status` / `get_report`。
 
-`start_migration` は必ずユーザーへの明示的な確認後に呼び出される（ツールのdescriptionにも明記）。
+MCPからvaultへアクセスするには、`O2N_ALLOWED_VAULTS=/absolute/path/to/vault` のように許可vaultを
+カンマ区切りで明示する。Notionへの本実行は既定で無効で、`O2N_ENABLE_MCP_WRITE=1` と
+`O2N_MCP_WRITE_TOKEN` を設定したうえで、`prepare_migration` の内容を確認してから
+`commit_migration` に確認トークンを渡す必要がある。`start_migration` は安全上の理由で無効化された。
 
 ## 変換される内容
 
@@ -113,9 +116,10 @@ docs/
 - NotionのOAuth（public integration）は`client_secret`が必須なため、CLIに埋め込むことはできない。
   代わりに`services/auth-proxy`（Cloudflare Worker）が`client_secret`を保持し、認可コード→トークンの
   交換だけを代行する
-- CLIはブラウザでNotionの認可画面を開き、承認されるとWorkerがサーバー側でトークン交換を行い、
-  結果をCloudflare KVに最大5分だけ保存する。CLIはポーリングで受け取り、
-  `~/.o2n/credentials.json`（パーミッション600）に保存する。KV上のトークンは1回取得されると即削除される
+- 旧poll方式は停止済み。新方式ではCLIが`127.0.0.1`の一時HTTPリスナーを開き、Workerは認可コードを
+  トークンへ交換した後、短寿命のhandoff codeだけをloopbackへ返す。CLIは手元のセッション秘密値と
+  handoff codeをWorkerへPOSTし、一度だけトークンを受け取って`~/.o2n/credentials.json`
+  （パーミッション600）に保存する
 - `client_secret`はCLI・MCPサーバー・このリポジトリのどこにも含まれない（Worker環境変数のみ）
 - Workerはトークン交換のみを行い、Vaultの内容やNotionページ内容には一切アクセスしない
 
@@ -134,21 +138,15 @@ npm test
 ## セキュリティ
 
 - Notionトークンは環境変数（`NOTION_TOKEN`）または`~/.o2n/credentials.json`（`o2n login`経由、パーミッション600）にのみ保存される
-- 書き込み先は指定した親ページ配下のみ
+- frontmatterはYAMLのみ対応。`---js` / `---javascript` / `---json` などの非YAML frontmatterは安全側に拒否される
+- `.o2n/state.json` はstate v2としてcanonical vault、plan hash、Notion識別子、ローカル署名で結合される
 - Vaultへの書き込みは`.o2n/`ディレクトリのみ（Vault本体は読み取り専用）
 - Vault内のシンボリックリンクは辿らない（vault外ファイルへのアクセス防止）
-- MCPサーバーは渡された`vaultPath`が実際にObsidian vault（`.obsidian`ディレクトリを持つ）か検証してから
-  読み書きする（AIエージェント経由での意図しないパスへのアクセスを防ぐ）
+- MCPサーバーは`realpath()`済みのvaultが`O2N_ALLOWED_VAULTS`に含まれる場合のみ読み書きする
 - Notion API以外への通信は行わない（テレメトリなし）
 
 ### `o2n login`（共有auth-proxy）の信頼モデル
 
-`o2n login`はデフォルトでTK-WFLが運用するCloudflare Worker（`o2n-auth-proxy.workflow-lab.workers.dev`）を
-経由してNotionのclient_secretを扱う。このWorkerは認可コード→トークンの交換のみを行い、Vaultの内容や
-Notionページ内容には一切アクセスしないが、**利用にはこのWorkerの運用者を信頼する必要がある**。
-ポーリング用のURLパラメータ（`pollSecret`）は推測不可能な乱数のsha256ハッシュ経由でのみ照合され、
-トークンは取得後即座にKVから削除されるため、ブラウザ履歴やログに残る値だけからトークンを
-奪取することはできない設計だが、セキュリティ要件が高い場合は`services/auth-proxy`を自分の
-Cloudflareアカウントに自己ホストし、`packages/cli/src/oauth-config.ts`のURLを差し替えることを推奨する
-（手順は[services/auth-proxy/README.md](services/auth-proxy/README.md)参照）。`NOTION_TOKEN`環境変数を
+`o2n login`は既定停止中。再有効化する場合も、TK-WFLまたは自己ホストしたCloudflare Workerが
+Notionの`client_secret`を扱うため、Worker運用者を信頼する必要がある。`NOTION_TOKEN`環境変数を
 使う方法（internal integration）はこの信頼モデルに依存しない。

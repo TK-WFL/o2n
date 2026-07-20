@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { scanVault, buildPlan, type MigrationPlan } from '@tk_wfl/o2n-core';
+import { scanVault, buildPlan, parseMigrationPlan, type MigrationPlan } from '@tk_wfl/o2n-core';
 
 function planPath(vaultPath: string): string {
   return path.join(vaultPath, '.o2n', 'plan.json');
@@ -9,7 +9,7 @@ function planPath(vaultPath: string): string {
 export async function loadOrCreatePlan(vaultPath: string, parentPageId?: string): Promise<MigrationPlan> {
   try {
     const raw = await fs.readFile(planPath(vaultPath), 'utf-8');
-    const plan = JSON.parse(raw) as MigrationPlan;
+    const plan = parseMigrationPlan(JSON.parse(raw));
     if (parentPageId) plan.parentPageId = parentPageId;
     return plan;
   } catch {

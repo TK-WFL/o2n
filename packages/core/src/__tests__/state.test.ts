@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { StateStore, statePath } from '../state.js';
+import { StateIntegrityError, StateStore, planHash, statePath } from '../state.js';
 
 let tmpDir: string;
 
@@ -41,5 +41,36 @@ describe('StateStore readOnly（dry-run用）', () => {
 
     const realState = await StateStore.load(tmpDir, 'root-page');
     expect(realState.getNote('Note.md')).toBeUndefined();
+  });
+});
+
+describe('StateStore integrity guard', () => {
+  it('既存stateのparentPageIdが現在の計画と異なる場合は停止する', async () => {
+    const state = await StateStore.load(tmpDir, 'root-page');
+    await state.setNote('Note.md', { status: 'created', pageId: 'page-123', contentHash: 'sha256:abc' });
+
+    await expect(StateStore.load(tmpDir, 'other-root')).rejects.toBeInstanceOf(StateIntegrityError);
+  });
+
+  it('署名済みstateのNotion IDが改ざんされた場合は停止する', async () => {
+    const plan = { version: 1, vaultPath: tmpDir, parentPageId: 'root-page', folders: [], frontmatterMappings: {}, skipList: [] };
+    const state = await StateStore.load(tmpDir, 'root-page', {
+      planHash: planHash(plan),
+      notionWorkspaceId: 'workspace-a',
+      notionBotId: 'bot-a',
+    });
+    await state.setNote('Note.md', { status: 'created', pageId: 'page-123', contentHash: 'sha256:abc' });
+
+    const parsed = JSON.parse(await fs.readFile(statePath(tmpDir), 'utf-8'));
+    parsed.notes['Note.md'].pageId = 'attacker-page';
+    await fs.writeFile(statePath(tmpDir), JSON.stringify(parsed, null, 2), 'utf-8');
+
+    await expect(
+      StateStore.load(tmpDir, 'root-page', {
+        planHash: planHash(plan),
+        notionWorkspaceId: 'workspace-a',
+        notionBotId: 'bot-a',
+      }),
+    ).rejects.toBeInstanceOf(StateIntegrityError);
   });
 });

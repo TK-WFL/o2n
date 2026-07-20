@@ -212,7 +212,14 @@ export class NotionApi {
     return this.client.callCount;
   }
 
-  async getMe(): Promise<{ bot?: { workspace_limits?: { max_file_upload_size_in_bytes: number } } }> {
+  async getMe(): Promise<{
+    id?: string;
+    bot?: {
+      workspace_name?: string;
+      workspace_limits?: { max_file_upload_size_in_bytes: number };
+      owner?: { type?: string; workspace?: boolean; user?: { id?: string } };
+    };
+  }> {
     return this.client.request({ method: 'GET', path: '/users/me' });
   }
 

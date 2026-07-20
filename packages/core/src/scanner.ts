@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import matter from 'gray-matter';
+import matter from '@11ty/gray-matter';
 import type {
   AttachmentRef,
   NoteRecord,
@@ -20,9 +20,38 @@ const ATTACHMENT_EXTENSIONS = new Set([
 ]);
 
 const NON_CONVERTIBLE_EXTENSIONS = new Set(['canvas']);
+const ALLOWED_FRONTMATTER_LANGUAGES = new Set(['', 'yaml', 'yml']);
+
+export class UnsupportedFrontmatterLanguageError extends Error {
+  constructor(notePath: string, language: string) {
+    super(
+      `Unsupported frontmatter language "${language}" in ${notePath}. ` +
+        'Only YAML frontmatter is supported.',
+    );
+    this.name = 'UnsupportedFrontmatterLanguageError';
+  }
+}
 
 function toPosix(p: string): string {
   return p.split(path.sep).join('/');
+}
+
+function frontmatterLanguage(raw: string): string | null {
+  if (!raw.startsWith('---')) return null;
+  if (raw.charAt(3) === '-') return null;
+
+  const body = raw.slice(3);
+  const newlineIndex = body.search(/\r?\n/);
+  if (newlineIndex === -1) return '';
+  return body.slice(0, newlineIndex).trim().toLowerCase();
+}
+
+function parseNoteMatter(raw: string, notePath: string): ReturnType<typeof matter> {
+  const language = frontmatterLanguage(raw);
+  if (language !== null && !ALLOWED_FRONTMATTER_LANGUAGES.has(language)) {
+    throw new UnsupportedFrontmatterLanguageError(notePath, language);
+  }
+  return matter(raw);
 }
 
 async function walk(dir: string, root: string, out: string[]): Promise<void> {
@@ -184,7 +213,7 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
     const absPath = path.join(vaultPath, relPath);
     const raw = await fs.readFile(absPath, 'utf-8');
     const stat = await fs.stat(absPath);
-    const parsed = matter(raw);
+    const parsed = parseNoteMatter(raw, relPath);
 
     notes.push({
       path: relPath,

@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { scanVault } from '../scanner.js';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import { scanVault, UnsupportedFrontmatterLanguageError } from '../scanner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VAULT = path.resolve(__dirname, '../../../../fixtures/test-vault');
@@ -66,9 +68,6 @@ describe('scanVault (fixtures/test-vault)', () => {
 
 describe('scanVault symlinkガード（セキュリティ）', () => {
   it('vault内のsymlinkは辿らず、vault外のファイルが結果に含まれない', async () => {
-    const fs = await import('node:fs/promises');
-    const os = await import('node:os');
-
     const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-outside-'));
     const secretFile = path.join(outsideDir, 'secret.md');
     await fs.writeFile(secretFile, '# 機密情報\nvault外のファイル');
@@ -88,6 +87,57 @@ describe('scanVault symlinkガード（セキュリティ）', () => {
     } finally {
       await fs.rm(vaultDir, { recursive: true, force: true });
       await fs.rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('scanVault frontmatterガード（セキュリティ）', () => {
+  it.each(['js', 'javascript', 'JSON', 'toml'])('非YAML frontmatter (%s) を解析前に拒否する', async (language) => {
+    const vaultDir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-frontmatter-vault-'));
+    const marker = '__o2n_frontmatter_eval_marker__';
+    let executed = false;
+    (globalThis as Record<string, unknown>)[marker] = () => {
+      executed = true;
+      return { pwned: true };
+    };
+
+    try {
+      await fs.writeFile(
+        path.join(vaultDir, 'Evil.md'),
+        `---${language}\n${marker}()\n---\n本文`,
+      );
+
+      await expect(scanVault(vaultDir)).rejects.toBeInstanceOf(UnsupportedFrontmatterLanguageError);
+      expect(executed).toBe(false);
+    } finally {
+      delete (globalThis as Record<string, unknown>)[marker];
+      await fs.rm(vaultDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['', 'yaml', 'yml'])('YAML frontmatter (%s) は引き続き解析する', async (language) => {
+    const vaultDir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-yaml-frontmatter-vault-'));
+    const opener = language ? `---${language}` : '---';
+
+    try {
+      await fs.writeFile(path.join(vaultDir, 'Safe.md'), `${opener}\ntitle: Safe\ncount: 3\n---\n本文`);
+      const inv = await scanVault(vaultDir);
+      expect(inv.notes[0]?.frontmatter).toMatchObject({ title: 'Safe', count: 3 });
+    } finally {
+      await fs.rm(vaultDir, { recursive: true, force: true });
+    }
+  });
+
+  it('frontmatterなしのノートは解析できる', async () => {
+    const vaultDir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-no-frontmatter-vault-'));
+
+    try {
+      await fs.writeFile(path.join(vaultDir, 'Plain.md'), '# Plain\n本文');
+      const inv = await scanVault(vaultDir);
+      expect(inv.notes[0]?.frontmatter).toEqual({});
+      expect(inv.notes[0]?.content).toContain('# Plain');
+    } finally {
+      await fs.rm(vaultDir, { recursive: true, force: true });
     }
   });
 });

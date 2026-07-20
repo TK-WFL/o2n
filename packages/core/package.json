@@ -26,7 +26,8 @@
     "dist"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -34,9 +35,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@11ty/gray-matter": "^2.1.0",
     "@notionhq/client": "^2.3.0",
-    "gray-matter": "^4.0.3",
-    "p-queue": "^8.0.1"
+    "p-queue": "^8.0.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

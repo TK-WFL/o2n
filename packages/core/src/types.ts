@@ -131,8 +131,13 @@ export interface FolderState {
 }
 
 export interface StateFile {
-  version: 1;
+  version: 1 | 2;
   parentPageId: string;
+  canonicalVaultPath?: string;
+  planHash?: string;
+  notionWorkspaceId?: string;
+  notionBotId?: string;
+  signature?: string;
   notes: Record<string, NoteState>;
   files: Record<string, FileState>;
   /**

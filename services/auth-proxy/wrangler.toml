@@ -7,6 +7,15 @@ compatibility_date = "2026-07-01"
 binding = "OAUTH_STATE"
 id = "92e3eff9fc3944fd83e5d69bc397f03a"
 
+[[durable_objects.bindings]]
+name = "OAUTH_SESSIONS"
+class_name = "OAuthSessions"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["OAuthSessions"]
+
 # 秘密情報は `wrangler secret put NOTION_CLIENT_SECRET` で設定する（このファイルには書かない）
 [vars]
 NOTION_CLIENT_ID = "3a1d872b-594c-8121-94df-0037908f8601"
+OAUTH_ENABLED = "0"

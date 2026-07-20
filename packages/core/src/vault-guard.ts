@@ -19,12 +19,43 @@ export class NotAnObsidianVaultError extends Error {
   }
 }
 
-export async function assertObsidianVault(vaultPath: string): Promise<void> {
-  const resolved = path.resolve(vaultPath);
+export class VaultNotAllowedError extends Error {
+  constructor(vaultPath: string) {
+    super(`"${vaultPath}" は許可されたvaultパスに含まれていません。O2N_ALLOWED_VAULTS に明示してください。`);
+    this.name = 'VaultNotAllowedError';
+  }
+}
+
+export interface VaultGuardOptions {
+  allowedVaultRoots?: string[];
+}
+
+async function canonicalPath(p: string): Promise<string> {
+  return fs.realpath(path.resolve(p));
+}
+
+export async function assertObsidianVault(vaultPath: string, opts: VaultGuardOptions = {}): Promise<string> {
+  let resolved: string;
   try {
-    const stat = await fs.stat(path.join(resolved, '.obsidian'));
+    resolved = await canonicalPath(vaultPath);
+  } catch {
+    throw new NotAnObsidianVaultError(path.resolve(vaultPath));
+  }
+  try {
+    const obsidianPath = path.join(resolved, '.obsidian');
+    const linkStat = await fs.lstat(obsidianPath);
+    if (linkStat.isSymbolicLink()) throw new Error('symlink');
+    const stat = await fs.stat(obsidianPath);
     if (!stat.isDirectory()) throw new Error('not a directory');
   } catch {
     throw new NotAnObsidianVaultError(resolved);
   }
+
+  if (opts.allowedVaultRoots) {
+    const allowed = await Promise.all(opts.allowedVaultRoots.map((p) => canonicalPath(p)));
+    if (!allowed.includes(resolved)) {
+      throw new VaultNotAllowedError(resolved);
+    }
+  }
+  return resolved;
 }

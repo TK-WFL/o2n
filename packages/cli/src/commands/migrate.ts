@@ -8,6 +8,8 @@ import {
   StateStore,
   writeReport,
   buildReport,
+  parseMigrationPlan,
+  planHash,
   type MigrationPlan,
   type ReportEntry,
 } from '@tk_wfl/o2n-core';
@@ -25,7 +27,7 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   const dryRun = opts.dryRun ?? false;
   let plan: MigrationPlan;
   try {
-    plan = JSON.parse(await fs.readFile(opts.plan, 'utf-8')) as MigrationPlan;
+    plan = parseMigrationPlan(JSON.parse(await fs.readFile(opts.plan, 'utf-8')));
   } catch (err) {
     console.error(`計画ファイルの読み込みに失敗しました: ${opts.plan}\n${String(err)}`);
     return 2;
@@ -41,7 +43,14 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   const inventory = await scanVault(vaultPath);
   const client = new NotionClient({ token, dryRun });
   const api = new NotionApi(client);
-  const state = await StateStore.load(vaultPath, plan.parentPageId, { readOnly: dryRun });
+  const me = dryRun ? undefined : await api.getMe();
+  const state = await StateStore.load(vaultPath, plan.parentPageId, {
+    readOnly: dryRun,
+    planHash: planHash(plan),
+    notionWorkspaceId: dryRun ? undefined : (me?.bot?.workspace_name ?? 'unknown-workspace'),
+    notionBotId: dryRun ? undefined : (me?.id ?? 'unknown-bot'),
+    allowUnsignedState: false,
+  });
 
   console.log(dryRun ? '[dry-run] 移行を開始します（書き込みAPIは呼ばれません）' : '移行を開始します');
   const total = inventory.notes.length;
