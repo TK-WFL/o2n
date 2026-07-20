@@ -15,6 +15,24 @@ class_name = "OAuthSessions"
 tag = "v1"
 new_sqlite_classes = ["OAuthSessions"]
 
+[[ratelimits]]
+name = "SESSION_RATE_LIMITER"
+# Cloudflare account内で一意の正整数文字列に変更する
+namespace_id = "41723001"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
+[[ratelimits]]
+name = "EXCHANGE_RATE_LIMITER"
+# Cloudflare account内で一意の正整数文字列に変更する
+namespace_id = "41723002"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
 # 秘密情報は `wrangler secret put NOTION_CLIENT_SECRET` で設定する（このファイルには書かない）
 [vars]
 NOTION_CLIENT_ID = "3a1d872b-594c-8121-94df-0037908f8601"

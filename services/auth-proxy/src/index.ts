@@ -1,23 +1,37 @@
+import {
+  enforceRateLimit,
+  isOAuthReady,
+  readBoundedJson,
+  sessionExpiresAt,
+  sha256Hex,
+  timingSafeEqualHex,
+  type RateLimiter,
+} from './security.js';
+
 export interface Env {
   OAUTH_STATE: KVNamespace;
   OAUTH_SESSIONS: DurableObjectNamespace;
   NOTION_CLIENT_ID: string;
   NOTION_CLIENT_SECRET: string;
   OAUTH_ENABLED?: string;
+  SESSION_RATE_LIMITER?: RateLimiter;
+  EXCHANGE_RATE_LIMITER?: RateLimiter;
 }
 
-const STATE_TTL_SECONDS = 300;
 const LOCAL_CALLBACK_PATH = '/callback';
+const MAX_FAILED_EXCHANGES = 5;
+const PUBLIC_ERROR_MESSAGE = 'The request could not be processed.';
 
 interface OAuthSession {
   state: string;
   port: number;
   secretHash: string;
   createdAt: number;
+  expiresAt: number;
   token?: string;
   workspaceName?: string | null;
   handoffCode?: string;
-  consumed?: boolean;
+  failedExchanges?: number;
 }
 
 interface RegisterSessionRequest {
@@ -51,11 +65,6 @@ interface ExchangeResponse {
   workspaceName?: string | null;
 }
 
-async function sha256Hex(input: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 function securityHeaders(contentType: string): HeadersInit {
   return {
     'Content-Type': contentType,
@@ -81,22 +90,12 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: securityHeaders('application/json') });
 }
 
-function isOAuthEnabled(env: Env): boolean {
-  return env.OAUTH_ENABLED === '1';
-}
-
 function disabled(): Response {
-  return json(
-    {
-      error: 'oauth_disabled',
-      message: 'o2n browser OAuth is disabled. Use NOTION_TOKEN until loopback OAuth is explicitly enabled.',
-    },
-    503,
-  );
+  return json({ error: 'oauth_unavailable', message: PUBLIC_ERROR_MESSAGE }, 503);
 }
 
-function badRequest(message: string): Response {
-  return json({ error: 'bad_request', message }, 400);
+function publicError(error: string, status: number): Response {
+  return json({ error, message: PUBLIC_ERROR_MESSAGE }, status);
 }
 
 function sessionStub(env: Env, state: string): DurableObjectStub {
@@ -106,13 +105,8 @@ function sessionStub(env: Env, state: string): DurableObjectStub {
 
 async function callSession<T>(env: Env, state: string, path: string, init?: RequestInit): Promise<T> {
   const res = await sessionStub(env, state).fetch(`https://o2n-session${path}`, init);
-  const data = (await res.json().catch(() => ({}))) as T & { message?: string; error?: string };
-  if (!res.ok) throw new Error(data.message ?? data.error ?? `session request failed: ${res.status}`);
-  return data;
-}
-
-async function readJson<T>(request: Request): Promise<T> {
-  return (await request.json()) as T;
+  if (!res.ok) throw new Error(`session request failed with status ${res.status}`);
+  return (await res.json()) as T;
 }
 
 function validateState(state: unknown): state is string {
@@ -127,6 +121,32 @@ function validatePort(port: unknown): port is number {
   return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535;
 }
 
+function validateHandoffCode(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  );
+}
+
+function validateSessionSecret(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+function clientRateLimitKey(request: Request, endpoint: 'session' | 'exchange'): Promise<string> {
+  const clientAddress = request.headers.get('cf-connecting-ip') ?? 'unavailable';
+  return sha256Hex(`${endpoint}:${clientAddress}`);
+}
+
+async function rateLimitResponse(
+  request: Request,
+  limiter: RateLimiter | undefined,
+  endpoint: 'session' | 'exchange',
+): Promise<Response | null> {
+  const result = await enforceRateLimit(limiter, await clientRateLimitKey(request, endpoint));
+  if (result === 'allowed') return null;
+  return publicError(result === 'limited' ? 'rate_limited' : 'oauth_unavailable', result === 'limited' ? 429 : 503);
+}
+
 function localCallbackUrl(port: number, params: Record<string, string>): string {
   const url = new URL(`http://127.0.0.1:${port}${LOCAL_CALLBACK_PATH}`);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
@@ -134,23 +154,36 @@ function localCallbackUrl(port: number, params: Record<string, string>): string 
 }
 
 async function handleSession(request: Request, env: Env): Promise<Response> {
-  if (!isOAuthEnabled(env)) return disabled();
-  if (request.method !== 'POST') return badRequest('method not allowed');
+  if (!isOAuthReady(env)) return disabled();
+  if (request.method !== 'POST') return publicError('method_not_allowed', 405);
 
-  const body = await readJson<RegisterSessionRequest>(request);
-  if (!validateState(body.state)) return badRequest('invalid state');
-  if (!validatePort(body.port)) return badRequest('invalid loopback port');
-  if (!validateSecretHash(body.secretHash)) return badRequest('invalid session secret hash');
+  const limited = await rateLimitResponse(request, env.SESSION_RATE_LIMITER, 'session');
+  if (limited) return limited;
+
+  const body = await readBoundedJson(request) as Partial<RegisterSessionRequest> | null;
+  if (
+    !body ||
+    !validateState(body.state) ||
+    !validatePort(body.port) ||
+    !validateSecretHash(body.secretHash)
+  ) {
+    return publicError('invalid_request', 400);
+  }
 
   await callSession(env, body.state, '/register', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   return json({ status: 'registered' });
 }
 
+async function cancelSession(env: Env, state: string): Promise<void> {
+  await sessionStub(env, state).fetch('https://o2n-session/cancel', { method: 'POST' }).catch(() => undefined);
+}
+
 async function handleCallback(request: Request, env: Env): Promise<Response> {
-  if (!isOAuthEnabled(env)) return html('<h1>OAuthは現在停止中です</h1><p>NOTION_TOKEN を使用してください。</p>', 503);
+  if (!isOAuthReady(env)) return html('<h1>OAuthは現在利用できません</h1>', 503);
 
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
@@ -158,18 +191,23 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
   const error = url.searchParams.get('error');
 
   if (!state || !validateState(state)) {
-    return html('<h1>エラー</h1><p>stateパラメータがありません。CLIから開始したリンクを使ってください。</p>', 400);
+    return html('<h1>リクエストを処理できませんでした</h1>', 400);
   }
 
   let session: SessionPortResponse;
   try {
     session = await callSession<SessionPortResponse>(env, state, '/begin');
   } catch {
-    return html('<h1>エラー</h1><p>ログインセッションが見つからないか、期限切れです。</p>', 400);
+    return html('<h1>リクエストを処理できませんでした</h1>', 400);
   }
 
   if (error || !code) {
-    return Response.redirect(localCallbackUrl(session.port, { state, error: error ?? 'authorization_failed' }), 302);
+    await cancelSession(env, state);
+    return Response.redirect(localCallbackUrl(session.port, { state, error: 'authorization_failed' }), 302);
+  }
+  if (code.length > 2_048) {
+    await cancelSession(env, state);
+    return html('<h1>リクエストを処理できませんでした</h1>', 400);
   }
 
   const redirectUri = `${url.origin}/callback`;
@@ -185,24 +223,41 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
   });
 
   if (!tokenRes.ok) {
-    const errBody = await tokenRes.text();
-    console.error(`Notion token exchange failed: ${tokenRes.status} ${errBody}`);
+    console.error(`Notion token exchange failed with status ${tokenRes.status}`);
+    await cancelSession(env, state);
     return Response.redirect(localCallbackUrl(session.port, { state, error: 'token_exchange_failed' }), 302);
   }
 
   const tokenData = (await tokenRes.json()) as {
-    access_token: string;
-    workspace_name?: string | null;
-    workspace_icon?: string | null;
+    access_token?: unknown;
+    workspace_name?: unknown;
   };
+  if (
+    typeof tokenData.access_token !== 'string' ||
+    tokenData.access_token.length < 1 ||
+    tokenData.access_token.length > 2_048 ||
+    (tokenData.workspace_name !== undefined &&
+      tokenData.workspace_name !== null &&
+      (typeof tokenData.workspace_name !== 'string' || tokenData.workspace_name.length > 200))
+  ) {
+    await cancelSession(env, state);
+    return Response.redirect(localCallbackUrl(session.port, { state, error: 'token_exchange_failed' }), 302);
+  }
 
-  const completed = await callSession<CompleteSessionResponse>(env, state, '/complete', {
-    method: 'POST',
-    body: JSON.stringify({
-      token: tokenData.access_token,
-      workspaceName: tokenData.workspace_name ?? null,
-    } satisfies CompleteSessionRequest),
-  });
+  let completed: CompleteSessionResponse;
+  try {
+    completed = await callSession<CompleteSessionResponse>(env, state, '/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: tokenData.access_token,
+        workspaceName: tokenData.workspace_name ?? null,
+      } satisfies CompleteSessionRequest),
+    });
+  } catch {
+    await cancelSession(env, state);
+    return Response.redirect(localCallbackUrl(session.port, { state, error: 'session_completion_failed' }), 302);
+  }
 
   return Response.redirect(
     localCallbackUrl(completed.port, {
@@ -215,22 +270,36 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
 }
 
 async function handleExchange(request: Request, env: Env): Promise<Response> {
-  if (!isOAuthEnabled(env)) return disabled();
-  if (request.method !== 'POST') return badRequest('method not allowed');
+  if (!isOAuthReady(env)) return disabled();
+  if (request.method !== 'POST') return publicError('method_not_allowed', 405);
 
-  const body = await readJson<{ state?: string; handoffCode?: string; sessionSecret?: string }>(request);
-  if (!validateState(body.state)) return badRequest('invalid state');
-  if (!body.handoffCode || !body.sessionSecret) return badRequest('handoffCode and sessionSecret are required');
+  const limited = await rateLimitResponse(request, env.EXCHANGE_RATE_LIMITER, 'exchange');
+  if (limited) return limited;
+
+  const body = await readBoundedJson(request) as {
+    state?: unknown;
+    handoffCode?: unknown;
+    sessionSecret?: unknown;
+  } | null;
+  if (
+    !body ||
+    !validateState(body.state) ||
+    !validateHandoffCode(body.handoffCode) ||
+    !validateSessionSecret(body.sessionSecret)
+  ) {
+    return publicError('invalid_request', 400);
+  }
 
   const exchanged = await callSession<ExchangeResponse>(env, body.state, '/exchange', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ handoffCode: body.handoffCode, sessionSecret: body.sessionSecret } satisfies ExchangeRequest),
   });
   return json(exchanged);
 }
 
 async function handlePoll(): Promise<Response> {
-  return json({ error: 'poll_removed', message: 'The insecure OAuth polling endpoint has been removed.' }, 410);
+  return publicError('poll_removed', 410);
 }
 
 export class OAuthSessions {
@@ -242,61 +311,104 @@ export class OAuthSessions {
       if (url.pathname === '/register') return this.register(request);
       if (url.pathname === '/begin') return this.begin();
       if (url.pathname === '/complete') return this.complete(request);
-      if (url.pathname === '/exchange') return this.exchange(request);
+      if (url.pathname === '/exchange') {
+        return this.state.blockConcurrencyWhile(() => this.exchange(request));
+      }
+      if (url.pathname === '/cancel') return this.cancel();
       return json({ error: 'not_found' }, 404);
-    } catch (err) {
-      return json({ error: 'session_error', message: err instanceof Error ? err.message : String(err) }, 400);
+    } catch {
+      return publicError('session_error', 400);
     }
+  }
+
+  async alarm(): Promise<void> {
+    await this.clearSession();
+  }
+
+  private async clearSession(): Promise<void> {
+    await this.state.storage.deleteAll();
+    await this.state.storage.deleteAlarm();
+  }
+
+  private async storeSession(session: OAuthSession): Promise<void> {
+    await this.state.storage.setAlarm(session.expiresAt);
+    await this.state.storage.put('session', session);
   }
 
   private async current(): Promise<OAuthSession | null> {
     const session = await this.state.storage.get<OAuthSession>('session');
     if (!session) return null;
-    if (Date.now() - session.createdAt > STATE_TTL_SECONDS * 1000) {
-      await this.state.storage.delete('session');
+    if (!Number.isFinite(session.expiresAt) || Date.now() >= session.expiresAt) {
+      await this.clearSession();
       return null;
     }
     return session;
   }
 
   private async register(request: Request): Promise<Response> {
-    const body = await readJson<RegisterSessionRequest>(request);
-    const existing = await this.current();
-    if (existing && !existing.consumed) {
-      return json({ error: 'session_exists', message: 'OAuth session already exists' }, 409);
+    const body = await readBoundedJson(request) as Partial<RegisterSessionRequest> | null;
+    if (
+      !body ||
+      !validateState(body.state) ||
+      !validatePort(body.port) ||
+      !validateSecretHash(body.secretHash)
+    ) {
+      return publicError('invalid_request', 400);
     }
 
+    const existing = await this.current();
+    if (existing) {
+      return publicError('session_exists', 409);
+    }
+
+    const now = Date.now();
     const session: OAuthSession = {
       state: body.state,
       port: body.port,
       secretHash: body.secretHash,
-      createdAt: Date.now(),
-      consumed: false,
+      createdAt: now,
+      expiresAt: sessionExpiresAt(now),
+      failedExchanges: 0,
     };
-    await this.state.storage.put('session', session);
+    await this.storeSession(session);
     return json({ status: 'registered' });
   }
 
   private async begin(): Promise<Response> {
     const session = await this.current();
-    if (!session || session.consumed) return json({ error: 'not_found' }, 404);
+    if (!session) return json({ error: 'not_found' }, 404);
     return json({ port: session.port } satisfies SessionPortResponse);
   }
 
   private async complete(request: Request): Promise<Response> {
     const session = await this.current();
-    if (!session || session.consumed) return json({ error: 'not_found' }, 404);
-    const body = await readJson<CompleteSessionRequest>(request);
-    if (!body.token) return badRequest('token is required');
+    if (!session) return json({ error: 'not_found' }, 404);
+
+    const body = await readBoundedJson(request) as Partial<CompleteSessionRequest> | null;
+    if (
+      !body ||
+      typeof body.token !== 'string' ||
+      body.token.length < 1 ||
+      body.token.length > 2_048 ||
+      (body.workspaceName !== undefined &&
+        body.workspaceName !== null &&
+        (typeof body.workspaceName !== 'string' || body.workspaceName.length > 200))
+    ) {
+      return publicError('invalid_request', 400);
+    }
+
     const handoffCode = crypto.randomUUID();
+    const now = Date.now();
 
     const completed: OAuthSession = {
       ...session,
       token: body.token,
       workspaceName: body.workspaceName ?? null,
       handoffCode,
+      expiresAt: sessionExpiresAt(now),
+      failedExchanges: 0,
     };
-    await this.state.storage.put('session', completed);
+    await this.storeSession(completed);
     return json({
       port: completed.port,
       handoffCode,
@@ -306,44 +418,70 @@ export class OAuthSessions {
 
   private async exchange(request: Request): Promise<Response> {
     const session = await this.current();
-    if (!session || session.consumed || !session.token || !session.handoffCode) {
+    if (!session || !session.token || !session.handoffCode) {
       return json({ error: 'not_found' }, 404);
     }
 
-    const body = await readJson<ExchangeRequest>(request);
+    const body = await readBoundedJson(request) as Partial<ExchangeRequest> | null;
+    if (!body || !validateHandoffCode(body.handoffCode) || !validateSessionSecret(body.sessionSecret)) {
+      return publicError('invalid_request', 400);
+    }
+
     const secretHash = await sha256Hex(body.sessionSecret);
-    if (body.handoffCode !== session.handoffCode || secretHash !== session.secretHash) {
-      return json({ error: 'invalid_grant', message: 'invalid handoff code or session secret' }, 403);
+    const [handoffHash, expectedHandoffHash] = await Promise.all([
+      sha256Hex(body.handoffCode),
+      sha256Hex(session.handoffCode),
+    ]);
+    if (
+      !timingSafeEqualHex(handoffHash, expectedHandoffHash) ||
+      !timingSafeEqualHex(secretHash, session.secretHash)
+    ) {
+      const failedExchanges = (session.failedExchanges ?? 0) + 1;
+      if (failedExchanges >= MAX_FAILED_EXCHANGES) {
+        await this.clearSession();
+      } else {
+        await this.state.storage.put('session', { ...session, failedExchanges });
+      }
+      return publicError('invalid_grant', 403);
     }
 
     const response: ExchangeResponse = {
       token: session.token,
       workspaceName: session.workspaceName ?? null,
     };
-    await this.state.storage.put('session', { ...session, consumed: true, token: undefined });
+    await this.clearSession();
     return json(response);
+  }
+
+  private async cancel(): Promise<Response> {
+    await this.clearSession();
+    return json({ status: 'cancelled' });
   }
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
+    try {
+      const url = new URL(request.url);
 
-    if (url.pathname === '/session') {
-      return handleSession(request, env);
+      if (url.pathname === '/session') {
+        return await handleSession(request, env);
+      }
+      if (url.pathname === '/callback') {
+        return await handleCallback(request, env);
+      }
+      if (url.pathname === '/exchange') {
+        return await handleExchange(request, env);
+      }
+      if (url.pathname === '/poll') {
+        return handlePoll();
+      }
+      if (url.pathname === '/' || url.pathname === '') {
+        return html('<h1>o2n auth proxy</h1><p>このサーバーは o2n CLI/MCPサーバーからのみ使用されます。</p>');
+      }
+      return new Response('Not found', { status: 404 });
+    } catch {
+      return publicError('request_failed', 500);
     }
-    if (url.pathname === '/callback') {
-      return handleCallback(request, env);
-    }
-    if (url.pathname === '/exchange') {
-      return handleExchange(request, env);
-    }
-    if (url.pathname === '/poll') {
-      return handlePoll();
-    }
-    if (url.pathname === '/' || url.pathname === '') {
-      return html('<h1>o2n auth proxy</h1><p>このサーバーは o2n CLI/MCPサーバーからのみ使用されます。</p>');
-    }
-    return new Response('Not found', { status: 404 });
   },
 };
