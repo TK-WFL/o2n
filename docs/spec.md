@@ -1,6 +1,6 @@
 # o2n Specification
 
-Last updated: 2026-07-20
+Last updated: 2026-07-20 (OAuth proxy lifecycle hardening)
 
 ## Scope
 
@@ -59,7 +59,16 @@ old state before resuming a migration created by an older unsafe version.
 - MCP real writes require `O2N_ENABLE_MCP_WRITE=1` and a matching `O2N_MCP_WRITE_TOKEN`.
 - `start_migration` is disabled; use `prepare_migration` and `commit_migration`.
 - Browser OAuth is disabled unless `O2N_ENABLE_BROWSER_LOGIN=1`.
-- The auth proxy removes `/poll` and stores OAuth handoff state in a Durable Object for one-time consume.
+- The auth proxy additionally requires `OAUTH_ENABLED=1`, both Cloudflare Rate Limiting bindings,
+  the Durable Object binding, Client ID, and Client Secret. A missing runtime binding fails closed.
+- `/session` and `/exchange` accept only bounded JSON requests and apply per-source Cloudflare rate limits;
+  the random state, one-time handoff code, and terminal-local secret remain the authorization controls.
+- OAuth handoff state and tokens are held in a Durable Object for at most five minutes after registration or
+  completion. An alarm, cancellation, too many failed exchanges, or a successful one-time exchange deletes
+  all session storage; successful exchange also clears the alarm.
+- Secret and handoff comparisons use fixed-format digest comparisons, and public failures do not expose
+  internal exception messages.
+- The auth proxy removes `/poll`; it always returns HTTP 410.
 - HTML responses use `no-store`, `no-referrer`, `nosniff`, and a restrictive CSP.
 
 ## Privacy Notes
@@ -71,5 +80,7 @@ OAuth code exchange only and does not read vault contents.
 
 - Replaced unsafe frontmatter parsing with YAML-only validation.
 - Disabled vulnerable OAuth polling and added loopback handoff.
+- Hardened OAuth Durable Object cleanup, bounded API inputs, abuse controls, fail-closed bindings, and
+  one-time secret comparison; upgraded Wrangler to an audit-clean 4.112.0-compatible release.
 - Added signed state v2 and plan/state schema validation.
 - Hardened MCP path and write boundaries.
