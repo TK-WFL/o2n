@@ -36,7 +36,7 @@
   "dependencies": {
     "@tk_wfl/o2n-core": "^0.2.0",
     "@inquirer/prompts": "^7.2.0",
-    "commander": "^13.0.0"
+    "commander": "^15.0.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0"
