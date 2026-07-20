@@ -23,5 +23,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm audit --omit=dev
+      - run: npm ci
+        working-directory: services/auth-proxy
       - run: npm run typecheck
         working-directory: services/auth-proxy
