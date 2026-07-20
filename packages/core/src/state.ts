@@ -1,9 +1,14 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { FileState, FolderState, NoteState, StateFile } from './types.js';
 import { parseStateFile } from './schemas.js';
+import {
+  atomicWriteHomeStateFile,
+  atomicWriteVaultStateFile,
+  readHomeStateFile,
+  readVaultStateFile,
+} from './local-state-io.js';
 
 export function contentHash(content: string): string {
   return 'sha256:' + createHash('sha256').update(content, 'utf-8').digest('hex');
@@ -30,18 +35,14 @@ export function statePath(vaultPath: string): string {
   return path.join(stateDir(vaultPath), 'state.json');
 }
 
-function signingKeyPath(): string {
-  return path.join(os.homedir(), '.o2n', 'state-signing-key');
-}
-
 async function loadOrCreateSigningKey(readOnly: boolean): Promise<string | null> {
   try {
-    return await fs.readFile(signingKeyPath(), 'utf-8');
+    return await readHomeStateFile('state-signing-key');
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT' || readOnly) return null;
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    if (readOnly) return null;
     const key = randomBytes(32).toString('hex');
-    await fs.mkdir(path.dirname(signingKeyPath()), { recursive: true });
-    await fs.writeFile(signingKeyPath(), key, { mode: 0o600 });
+    await atomicWriteHomeStateFile('state-signing-key', key);
     return key;
   }
 }
@@ -96,9 +97,8 @@ export class StateStore {
     const readOnly = opts.readOnly ?? false;
     const canonicalVaultPath = await fs.realpath(vaultPath);
     const signingKey = await loadOrCreateSigningKey(readOnly);
-    const p = statePath(vaultPath);
     try {
-      const raw = await fs.readFile(p, 'utf-8');
+      const raw = await readVaultStateFile(vaultPath, 'state.json');
       const data = parseStateFile(JSON.parse(raw));
       validateStateBinding(data, {
         parentPageId,
@@ -179,14 +179,14 @@ export class StateStore {
   }
 
   private async writeNow(): Promise<void> {
-    const dir = stateDir(this.vaultPath);
-    await fs.mkdir(dir, { recursive: true });
-    const tmp = statePath(this.vaultPath) + `.tmp-${process.pid}`;
     if (this.signingKey) {
       this.data.signature = signState(this.data, this.signingKey);
     }
-    await fs.writeFile(tmp, JSON.stringify(this.data, null, 2), 'utf-8');
-    await fs.rename(tmp, statePath(this.vaultPath));
+    await atomicWriteVaultStateFile(
+      this.vaultPath,
+      'state.json',
+      JSON.stringify(this.data, null, 2),
+    );
   }
 }
 

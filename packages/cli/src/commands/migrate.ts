@@ -1,6 +1,6 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
+  atomicWriteVaultStateFile,
   scanVault,
   runMigration,
   NotionClient,
@@ -10,6 +10,8 @@ import {
   buildReport,
   parseMigrationPlan,
   planHash,
+  readRegularFileNoFollow,
+  readVaultStateFile,
   type MigrationPlan,
   type ReportEntry,
 } from '@tk_wfl/o2n-core';
@@ -27,7 +29,11 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   const dryRun = opts.dryRun ?? false;
   let plan: MigrationPlan;
   try {
-    plan = parseMigrationPlan(JSON.parse(await fs.readFile(opts.plan, 'utf-8')));
+    const vaultPlanPath = path.resolve(vaultPath, '.o2n', 'plan.json');
+    const raw = path.resolve(opts.plan) === vaultPlanPath
+      ? await readVaultStateFile(vaultPath, 'plan.json')
+      : await readRegularFileNoFollow(opts.plan);
+    plan = parseMigrationPlan(JSON.parse(raw));
   } catch (err) {
     console.error(`計画ファイルの読み込みに失敗しました: ${opts.plan}\n${String(err)}`);
     return 2;
@@ -35,9 +41,7 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   if (opts.parent) plan.parentPageId = opts.parent;
 
   // resumeで使えるよう vault内にも計画を保存する
-  const planCopyPath = path.join(vaultPath, '.o2n', 'plan.json');
-  await fs.mkdir(path.dirname(planCopyPath), { recursive: true });
-  await fs.writeFile(planCopyPath, JSON.stringify(plan, null, 2), 'utf-8');
+  await atomicWriteVaultStateFile(vaultPath, 'plan.json', JSON.stringify(plan, null, 2));
 
   const token = await getToken(dryRun);
   const inventory = await scanVault(vaultPath);

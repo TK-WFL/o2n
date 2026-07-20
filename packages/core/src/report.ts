@@ -1,7 +1,7 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { stateDir } from './state.js';
 import type { MigrationReport, ReportEntry, StateFile } from './types.js';
+import { atomicWriteVaultStateFile } from './local-state-io.js';
 
 export function reportPath(vaultPath: string): string {
   return path.join(stateDir(vaultPath), 'report.md');
@@ -52,7 +52,9 @@ export function renderReportMarkdown(report: MigrationReport, state: StateFile):
 }
 
 export async function writeReport(vaultPath: string, report: MigrationReport, state: StateFile): Promise<void> {
-  const dir = stateDir(vaultPath);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(reportPath(vaultPath), renderReportMarkdown(report, state), 'utf-8');
+  await atomicWriteVaultStateFile(
+    vaultPath,
+    'report.md',
+    renderReportMarkdown(report, state),
+  );
 }

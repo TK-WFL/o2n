@@ -1,6 +1,6 @@
 # o2n Specification
 
-Last updated: 2026-07-20
+Last updated: 2026-07-20 (secure local-state I/O revision)
 
 ## Scope
 
@@ -43,11 +43,15 @@ Vault-local files:
   - Notion workspace/bot identity
   - local HMAC signature
 - `.o2n/report.md`: migration report.
+- `.o2n` must be a real directory inside the canonical vault. Symlinks are rejected for the
+  directory, persisted files, and atomic-write temporary files.
+- Vault-local writes use a same-directory temporary regular file followed by atomic rename.
 
 User-home files:
 
 - `~/.o2n/credentials.json`: optional Notion token from `o2n login`, mode `0600`.
 - `~/.o2n/state-signing-key`: local HMAC key for state v2, mode `0600`.
+- `~/.o2n` has mode `0700`. Existing symlinks are rejected for the directory and both files.
 
 Unsigned v1 state is rejected by migration write paths. Users must discard or explicitly migrate
 old state before resuming a migration created by an older unsafe version.
@@ -55,6 +59,9 @@ old state before resuming a migration created by an older unsafe version.
 ## Security Boundaries
 
 - Vault scanning never follows symlinks.
+- Local state reads use no-follow file opens where supported and verify the opened handle is a
+  regular file. Writes reject symlink destinations and verify canonical vault containment before
+  same-directory atomic replacement.
 - MCP requires `O2N_ALLOWED_VAULTS` and compares `realpath()` values exactly.
 - MCP real writes require `O2N_ENABLE_MCP_WRITE=1` and a matching `O2N_MCP_WRITE_TOKEN`.
 - `start_migration` is disabled; use `prepare_migration` and `commit_migration`.
@@ -73,3 +80,5 @@ OAuth code exchange only and does not read vault contents.
 - Disabled vulnerable OAuth polling and added loopback handoff.
 - Added signed state v2 and plan/state schema validation.
 - Hardened MCP path and write boundaries.
+- Prevented `.o2n` and user-home credential symlinks from reading or overwriting arbitrary files,
+  and stopped automatic plan creation for errors other than a missing `plan.json`.

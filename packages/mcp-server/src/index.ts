@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -13,8 +12,7 @@ import {
   StateStore,
   writeReport,
   buildReport,
-  reportPath,
-  statePath,
+  readVaultStateFile,
   loadCredentials,
   assertObsidianVault,
   NotAnObsidianVaultError,
@@ -320,14 +318,14 @@ server.tool(
     const job = getJob(resolved);
     let stateSummary: Record<string, number> = {};
     try {
-      const raw = await fs.readFile(statePath(resolved), 'utf-8');
+      const raw = await readVaultStateFile(resolved, 'state.json');
       const state: StateFile = parseStateFile(JSON.parse(raw));
       stateSummary = Object.values(state.notes).reduce<Record<string, number>>((acc, n) => {
         acc[n.status] = (acc[n.status] ?? 0) + 1;
         return acc;
       }, {});
-    } catch {
-      // state.json未作成
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     return text(JSON.stringify({ job: job ?? { status: 'not_started' }, noteStatusCounts: stateSummary }, null, 2));
   },
@@ -341,9 +339,10 @@ server.tool(
     const guard = await guardVaultPath(vaultPath);
     if (guard.error) return guard.error;
     try {
-      const content = await fs.readFile(reportPath(guard.vaultPath), 'utf-8');
+      const content = await readVaultStateFile(guard.vaultPath, 'report.md');
       return text(content);
-    } catch {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       return text('レポートがまだ生成されていません。start_migration の完了後に再度お試しください。');
     }
   },
