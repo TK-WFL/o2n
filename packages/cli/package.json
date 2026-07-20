@@ -29,6 +29,8 @@
     "provenance": true
   },
   "scripts": {
+    "clean": "node ../../scripts/clean-dist.mjs",
+    "prebuild": "npm run clean",
     "build": "tsc -p tsconfig.json && chmod +x dist/index.js",
     "prepublishOnly": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
