@@ -95,6 +95,60 @@ describe('vault local state I/O', () => {
     ).rejects.toThrow();
   });
 
+  it('上位祖先symlink配下の既存plan読取りを拒否する', async () => {
+    const outsideDirectory = path.join(testRoot, 'outside-read');
+    const linkedAncestor = path.join(testRoot, 'linked-read');
+    const outsidePlan = path.join(outsideDirectory, 'existing', 'plan.json');
+    await fs.mkdir(path.dirname(outsidePlan), { recursive: true });
+    await fs.writeFile(outsidePlan, '{"secret":true}');
+    await fs.symlink(outsideDirectory, linkedAncestor);
+
+    await expect(
+      readRegularFileNoFollow(path.join(linkedAncestor, 'existing', 'plan.json')),
+    ).rejects.toThrow();
+  });
+
+  it('deep absolute plan pathを正常に読み取る', async () => {
+    const planPath = path.join(testRoot, 'absolute', 'deep', 'existing', 'plan.json');
+    await fs.mkdir(path.dirname(planPath), { recursive: true });
+    await fs.writeFile(planPath, '{"version":1}');
+
+    await expect(readRegularFileNoFollow(planPath)).resolves.toBe('{"version":1}');
+  });
+
+  it('deep relative plan pathを正常に読み取る', async () => {
+    const planPath = path.join(testRoot, 'relative-read', 'deep', 'plan.json');
+    await fs.mkdir(path.dirname(planPath), { recursive: true });
+    await fs.writeFile(planPath, '{"version":1}');
+
+    await expect(
+      readRegularFileNoFollow(path.relative(process.cwd(), planPath)),
+    ).resolves.toBe('{"version":1}');
+  });
+
+  it('parent open後の上位祖先差替えを外部plan読取りとして成功扱いしない', async () => {
+    const safeAncestor = path.join(testRoot, 'safe-read', 'ancestor');
+    const safePlan = path.join(safeAncestor, 'parent', 'plan.json');
+    const movedAncestor = path.join(testRoot, 'safe-read', 'ancestor-moved');
+    const outsideAncestor = path.join(testRoot, 'outside-swapped-read');
+    const outsidePlan = path.join(outsideAncestor, 'parent', 'plan.json');
+    await fs.mkdir(path.dirname(safePlan), { recursive: true });
+    await fs.mkdir(path.dirname(outsidePlan), { recursive: true });
+    await fs.writeFile(safePlan, '{"safe":true}');
+    await fs.writeFile(outsidePlan, '{"secret":true}');
+
+    await expect(
+      readRegularFileNoFollow(safePlan, {
+        testHooks: {
+          afterParentOpen: async () => {
+            await fs.rename(safeAncestor, movedAncestor);
+            await fs.symlink(outsideAncestor, safeAncestor);
+          },
+        },
+      }),
+    ).rejects.toThrow();
+  });
+
   it('custom outputの不足した親ディレクトリを安全に再帰作成する', async () => {
     const outputPath = path.join(testRoot, 'new', 'nested', 'plan.json');
 

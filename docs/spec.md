@@ -64,6 +64,8 @@ old state before resuming a migration created by an older unsafe version.
 - Local state reads use no-follow file opens where supported. On every platform, pre/post-open
   `lstat` metadata must match the opened handle's device, inode, and file type, and the parent
   directory identity is revalidated before content is returned.
+- Explicit plan-file reads validate every directory segment from the filesystem root through the
+  parent and reject higher-ancestor symlinks, including those with existing descendants.
 - Writes reject symlink destinations and verify canonical containment before same-directory atomic
   replacement. Custom plan output validates every parent segment from the filesystem root, creates
   missing segments one at a time, and rejects symlink ancestors even when deeper directories exist.
@@ -95,3 +97,4 @@ OAuth code exchange only and does not read vault contents.
 - Extended custom output ancestry checks from the filesystem root through the final parent.
 - Bound atomic temporary and destination names to one verified inode and hardened home-secret
   ownership, permission, and hard-link requirements.
+- Extended explicit plan reads to validate the complete parent ancestry.

@@ -30,6 +30,9 @@ interface OpenDirectory {
 
 export interface NoFollowReadOptions {
   noFollowFlag?: number;
+  testHooks?: {
+    afterParentOpen?: (parentPath: string) => Promise<void>;
+  };
 }
 
 export interface HomeStateReadOptions extends NoFollowReadOptions {
@@ -188,8 +191,9 @@ async function openDirectory(
   }
 }
 
-async function openOrCreateDirectoryTree(
+async function openDirectoryTree(
   directoryPath: string,
+  createMissing: boolean,
   noFollowFlag = NOFOLLOW,
 ): Promise<OpenDirectory> {
   const resolvedDirectory = path.resolve(directoryPath);
@@ -208,10 +212,12 @@ async function openOrCreateDirectoryTree(
     for (const segment of segments) {
       await assertDirectoryUnchanged(directory);
       const childPath = path.join(directory.canonicalPath, segment);
-      try {
-        await fs.mkdir(childPath, { mode: 0o700 });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (createMissing) {
+        try {
+          await fs.mkdir(childPath, { mode: 0o700 });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        }
       }
 
       const child = await openDirectory(childPath, {
@@ -532,11 +538,9 @@ export async function readRegularFileNoFollow(
 ): Promise<string> {
   const resolvedPath = path.resolve(filePath);
   const noFollowFlag = options.noFollowFlag ?? NOFOLLOW;
-  const directory = await openDirectory(path.dirname(resolvedPath), {
-    create: false,
-    noFollowFlag,
-  });
+  const directory = await openDirectoryTree(path.dirname(resolvedPath), false, noFollowFlag);
   try {
+    await options.testHooks?.afterParentOpen?.(directory.path);
     return await readFromDirectory(directory, path.basename(resolvedPath), noFollowFlag);
   } finally {
     await directory.handle.close();
@@ -549,7 +553,7 @@ export async function atomicWriteRegularFileNoFollow(
   options: AtomicWriteOptions = {},
 ): Promise<void> {
   const resolvedPath = path.resolve(filePath);
-  const directory = await openOrCreateDirectoryTree(path.dirname(resolvedPath));
+  const directory = await openDirectoryTree(path.dirname(resolvedPath), true);
   try {
     await atomicWriteToDirectory(directory, path.basename(resolvedPath), content, 0o600, options);
   } finally {
