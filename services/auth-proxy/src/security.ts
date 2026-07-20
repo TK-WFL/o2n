@@ -12,6 +12,7 @@ export interface OAuthRuntimeBindings {
   NOTION_CLIENT_SECRET?: string;
   OAUTH_SESSIONS?: unknown;
   SESSION_RATE_LIMITER?: RateLimiter;
+  CALLBACK_RATE_LIMITER?: RateLimiter;
   EXCHANGE_RATE_LIMITER?: RateLimiter;
 }
 
@@ -30,6 +31,7 @@ export function isOAuthReady(env: OAuthRuntimeBindings): boolean {
     env.NOTION_CLIENT_SECRET.length > 0 &&
     env.OAUTH_SESSIONS !== undefined &&
     env.SESSION_RATE_LIMITER !== undefined &&
+    env.CALLBACK_RATE_LIMITER !== undefined &&
     env.EXCHANGE_RATE_LIMITER !== undefined
   );
 }

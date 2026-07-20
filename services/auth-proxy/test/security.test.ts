@@ -19,9 +19,70 @@ function readyBindings(overrides: Partial<OAuthRuntimeBindings> = {}): OAuthRunt
     NOTION_CLIENT_SECRET: 'client-secret',
     OAUTH_SESSIONS: {},
     SESSION_RATE_LIMITER: limiter,
+    CALLBACK_RATE_LIMITER: limiter,
     EXCHANGE_RATE_LIMITER: limiter,
     ...overrides,
   };
+}
+
+function createSessionHarness() {
+  let storedSession: unknown;
+  let transactionTail = Promise.resolve();
+  const transactionApi = {
+    get: vi.fn(async () => storedSession),
+    put: vi.fn(async (_key: string, value: unknown) => {
+      storedSession = value;
+    }),
+    delete: vi.fn(async () => {
+      storedSession = undefined;
+    }),
+  };
+  const storage = {
+    ...transactionApi,
+    setAlarm: vi.fn().mockResolvedValue(undefined),
+    deleteAll: vi.fn(async () => {
+      storedSession = undefined;
+    }),
+    deleteAlarm: vi.fn().mockResolvedValue(undefined),
+    transaction: vi.fn(async (callback: (transaction: typeof transactionApi) => Promise<unknown>) => {
+      const previous = transactionTail;
+      let releaseTransaction!: () => void;
+      transactionTail = new Promise<void>((resolve) => {
+        releaseTransaction = resolve;
+      });
+      await previous;
+      try {
+        return await callback(transactionApi);
+      } finally {
+        releaseTransaction();
+      }
+    }),
+  };
+  const state = {
+    storage,
+    blockConcurrencyWhile: <T>(callback: () => Promise<T>) => callback(),
+  };
+  const sessions = new OAuthSessions(state as never);
+  const namespace = {
+    idFromName: vi.fn(() => 'session-id'),
+    get: vi.fn(() => ({
+      fetch: (input: string, init?: RequestInit) => sessions.fetch(new Request(input, init)),
+    })),
+  };
+  return { namespace, sessions };
+}
+
+async function registerTestSession(sessions: OAuthSessions, state: string): Promise<void> {
+  const response = await sessions.fetch(new Request('https://session/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      state,
+      port: 30_000,
+      secretHash: 'a'.repeat(64),
+    }),
+  }));
+  expect(response.status).toBe(200);
 }
 
 describe('OAuth security helpers', () => {
@@ -63,6 +124,7 @@ describe('OAuth security helpers', () => {
   it.each([
     ['disabled', { OAUTH_ENABLED: '0' }],
     ['missing session limiter', { SESSION_RATE_LIMITER: undefined }],
+    ['missing callback limiter', { CALLBACK_RATE_LIMITER: undefined }],
     ['missing exchange limiter', { EXCHANGE_RATE_LIMITER: undefined }],
     ['missing client secret', { NOTION_CLIENT_SECRET: undefined }],
   ])('設定不備をfail closedにする: %s', (_label, override) => {
@@ -76,6 +138,97 @@ describe('OAuth security helpers', () => {
     await expect(enforceRateLimit(denied, 'key')).resolves.toBe('limited');
     await expect(enforceRateLimit(failed, 'key')).resolves.toBe('unavailable');
     await expect(enforceRateLimit(undefined, 'key')).resolves.toBe('unavailable');
+  });
+
+  it('並行callbackのうち最初の1件だけがNotion token exchangeへ進む', async () => {
+    const state = '12345678-1234-4123-8123-123456789abc';
+    const { namespace, sessions } = createSessionHarness();
+    await registerTestSession(sessions, state);
+
+    const notionFetch = vi.fn().mockResolvedValue(Response.json({
+      access_token: 'notion-token',
+      workspace_name: 'Workspace',
+    }));
+    vi.stubGlobal('fetch', notionFetch);
+
+    try {
+      const env = readyBindings({ OAUTH_SESSIONS: namespace });
+      const callbackUrl = `https://auth.example.test/callback?state=${state}&code=one-time-code`;
+      const responses = await Promise.all([
+        authProxy.fetch(new Request(callbackUrl, { headers: { 'CF-Connecting-IP': '203.0.113.10' } }), env as never),
+        authProxy.fetch(new Request(callbackUrl, { headers: { 'CF-Connecting-IP': '203.0.113.10' } }), env as never),
+      ]);
+
+      expect(responses.map((response) => response.status).sort()).toEqual([302, 409]);
+      expect(notionFetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('token exchange失敗後は同じsessionを再試行できない', async () => {
+    const state = '12345678-1234-4123-8123-123456789abc';
+    const { namespace, sessions } = createSessionHarness();
+    await registerTestSession(sessions, state);
+    const notionFetch = vi.fn().mockResolvedValue(new Response('rejected', { status: 400 }));
+    vi.stubGlobal('fetch', notionFetch);
+
+    try {
+      const env = readyBindings({ OAUTH_SESSIONS: namespace });
+      const callback = () => authProxy.fetch(
+        new Request(`https://auth.example.test/callback?state=${state}&code=one-time-code`, {
+          headers: { 'CF-Connecting-IP': '203.0.113.10' },
+        }),
+        env as never,
+      );
+
+      expect((await callback()).status).toBe(302);
+      expect((await callback()).status).toBe(400);
+      expect(notionFetch).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('cancel callbackもbeginを消費してsessionを削除する', async () => {
+    const state = '12345678-1234-4123-8123-123456789abc';
+    const { namespace, sessions } = createSessionHarness();
+    await registerTestSession(sessions, state);
+    const env = readyBindings({ OAUTH_SESSIONS: namespace });
+
+    const cancelled = await authProxy.fetch(
+      new Request(`https://auth.example.test/callback?state=${state}&error=access_denied`, {
+        headers: { 'CF-Connecting-IP': '203.0.113.10' },
+      }),
+      env as never,
+    );
+    const retried = await authProxy.fetch(
+      new Request(`https://auth.example.test/callback?state=${state}&code=one-time-code`, {
+        headers: { 'CF-Connecting-IP': '203.0.113.10' },
+      }),
+      env as never,
+    );
+
+    expect(cancelled.status).toBe(302);
+    expect(retried.status).toBe(400);
+  });
+
+  it('callback limiterの欠落と拒否をfail closedにする', async () => {
+    const callbackUrl = 'https://auth.example.test/callback?state=12345678-1234-4123-8123-123456789abc&code=code';
+    const missingResponse = await authProxy.fetch(
+      new Request(callbackUrl, { headers: { 'CF-Connecting-IP': '203.0.113.10' } }),
+      readyBindings({ CALLBACK_RATE_LIMITER: undefined }) as never,
+    );
+    expect(missingResponse.status).toBe(503);
+
+    const denied = { limit: vi.fn().mockResolvedValue({ success: false }) };
+    const deniedResponse = await authProxy.fetch(
+      new Request(callbackUrl, { headers: { 'CF-Connecting-IP': '203.0.113.10' } }),
+      readyBindings({ CALLBACK_RATE_LIMITER: denied }) as never,
+    );
+    expect(deniedResponse.status).toBe(429);
+    expect(denied).toHaveProperty('limit');
+    expect(denied.limit).toHaveBeenCalledOnce();
   });
 
   it('JSON以外、bodyなし、上限超過bodyを拒否する', async () => {

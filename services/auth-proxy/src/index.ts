@@ -16,6 +16,7 @@ export interface Env {
   NOTION_CLIENT_SECRET: string;
   OAUTH_ENABLED?: string;
   SESSION_RATE_LIMITER?: RateLimiter;
+  CALLBACK_RATE_LIMITER?: RateLimiter;
   EXCHANGE_RATE_LIMITER?: RateLimiter;
 }
 
@@ -24,6 +25,7 @@ const MAX_FAILED_EXCHANGES = 5;
 const PUBLIC_ERROR_MESSAGE = 'The request could not be processed.';
 
 interface OAuthSession {
+  phase: 'registered' | 'exchanging' | 'completed';
   state: string;
   port: number;
   secretHash: string;
@@ -64,6 +66,12 @@ interface CompleteSessionResponse {
 interface ExchangeResponse {
   token: string;
   workspaceName?: string | null;
+}
+
+class SessionRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`session request failed with status ${status}`);
+  }
 }
 
 function securityHeaders(contentType: string): HeadersInit {
@@ -111,7 +119,7 @@ function sessionStub(env: Env, state: string): DurableObjectStub {
 
 async function callSession<T>(env: Env, state: string, path: string, init?: RequestInit): Promise<T> {
   const res = await sessionStub(env, state).fetch(`https://o2n-session${path}`, init);
-  if (!res.ok) throw new Error(`session request failed with status ${res.status}`);
+  if (!res.ok) throw new SessionRequestError(res.status);
   return (await res.json()) as T;
 }
 
@@ -138,7 +146,7 @@ function validateSessionSecret(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 }
 
-function clientRateLimitKey(request: Request, endpoint: 'session' | 'exchange'): Promise<string> {
+function clientRateLimitKey(request: Request, endpoint: 'session' | 'callback' | 'exchange'): Promise<string> {
   const clientAddress = request.headers.get('cf-connecting-ip') ?? 'unavailable';
   return sha256Hex(`${endpoint}:${clientAddress}`);
 }
@@ -146,7 +154,7 @@ function clientRateLimitKey(request: Request, endpoint: 'session' | 'exchange'):
 async function rateLimitResponse(
   request: Request,
   limiter: RateLimiter | undefined,
-  endpoint: 'session' | 'exchange',
+  endpoint: 'session' | 'callback' | 'exchange',
 ): Promise<Response | null> {
   const result = await enforceRateLimit(limiter, await clientRateLimitKey(request, endpoint));
   if (result === 'allowed') return null;
@@ -193,6 +201,9 @@ async function cancelSession(env: Env, state: string): Promise<void> {
 async function handleCallback(request: Request, env: Env): Promise<Response> {
   if (!isOAuthReady(env)) return html('<h1>OAuthは現在利用できません</h1>', 503);
 
+  const limited = await rateLimitResponse(request, env.CALLBACK_RATE_LIMITER, 'callback');
+  if (limited) return limited;
+
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
@@ -205,8 +216,9 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
   let session: SessionPortResponse;
   try {
     session = await callSession<SessionPortResponse>(env, state, '/begin');
-  } catch {
-    return html('<h1>リクエストを処理できませんでした</h1>', 400);
+  } catch (error) {
+    const status = error instanceof SessionRequestError && error.status === 409 ? 409 : 400;
+    return html('<h1>リクエストを処理できませんでした</h1>', status);
   }
 
   if (error || !code) {
@@ -219,16 +231,22 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
   }
 
   const redirectUri = `${url.origin}/callback`;
-  const basicAuth = btoa(`${env.NOTION_CLIENT_ID}:${env.NOTION_CLIENT_SECRET}`);
 
-  const tokenRes = await fetch('https://api.notion.com/v1/oauth/token', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${basicAuth}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
-  });
+  let tokenRes: Response;
+  try {
+    const basicAuth = btoa(`${env.NOTION_CLIENT_ID}:${env.NOTION_CLIENT_SECRET}`);
+    tokenRes = await fetch('https://api.notion.com/v1/oauth/token', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
+    });
+  } catch {
+    await cancelSession(env, state);
+    return Response.redirect(localCallbackUrl(session.port, { state, error: 'token_exchange_failed' }), 302);
+  }
 
   if (!tokenRes.ok) {
     console.error(`Notion token exchange failed with status ${tokenRes.status}`);
@@ -236,10 +254,13 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
     return Response.redirect(localCallbackUrl(session.port, { state, error: 'token_exchange_failed' }), 302);
   }
 
-  const tokenData = (await tokenRes.json()) as {
-    access_token?: unknown;
-    workspace_name?: unknown;
-  };
+  let tokenData: { access_token?: unknown; workspace_name?: unknown };
+  try {
+    tokenData = (await tokenRes.json()) as typeof tokenData;
+  } catch {
+    await cancelSession(env, state);
+    return Response.redirect(localCallbackUrl(session.port, { state, error: 'token_exchange_failed' }), 302);
+  }
   if (
     typeof tokenData.access_token !== 'string' ||
     tokenData.access_token.length < 1 ||
@@ -375,6 +396,7 @@ export class OAuthSessions {
 
     const now = Date.now();
     const session: OAuthSession = {
+      phase: 'registered',
       state: body.state,
       port: body.port,
       secretHash: body.secretHash,
@@ -387,14 +409,31 @@ export class OAuthSessions {
   }
 
   private async begin(): Promise<Response> {
-    const session = await this.current();
-    if (!session) return json({ error: 'not_found' }, 404);
-    return json({ port: session.port } satisfies SessionPortResponse);
+    const outcome = await this.state.storage.transaction(async (transaction) => {
+      const session = await transaction.get<OAuthSession>('session');
+      if (!session) return { status: 'not_found' } as const;
+
+      if (!Number.isFinite(session.expiresAt) || Date.now() >= session.expiresAt) {
+        await transaction.delete('session');
+        return { status: 'not_found' } as const;
+      }
+      if (session.phase !== 'registered') {
+        return { status: 'already_started' } as const;
+      }
+
+      await transaction.put('session', { ...session, phase: 'exchanging' });
+      return { status: 'started', port: session.port } as const;
+    });
+
+    if (outcome.status === 'not_found') return json({ error: 'not_found' }, 404);
+    if (outcome.status === 'already_started') return publicError('callback_already_started', 409);
+    return json({ port: outcome.port } satisfies SessionPortResponse);
   }
 
   private async complete(request: Request): Promise<Response> {
     const session = await this.current();
     if (!session) return json({ error: 'not_found' }, 404);
+    if (session.phase !== 'exchanging') return publicError('invalid_session_phase', 409);
 
     const parsedBody = await readJsonBody(request);
     if (parsedBody instanceof Response) return parsedBody;
@@ -416,6 +455,7 @@ export class OAuthSessions {
 
     const completed: OAuthSession = {
       ...session,
+      phase: 'completed',
       token: body.token,
       workspaceName: body.workspaceName ?? null,
       handoffCode,
@@ -432,7 +472,7 @@ export class OAuthSessions {
 
   private async exchange(request: Request): Promise<Response> {
     const session = await this.current();
-    if (!session || !session.token || !session.handoffCode) {
+    if (session?.phase !== 'completed' || !session.token || !session.handoffCode) {
       return json({ error: 'not_found' }, 404);
     }
 
