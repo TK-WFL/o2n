@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { scanCommand } from './commands/scan.js';
 import { planCommand } from './commands/plan.js';
@@ -8,8 +11,11 @@ import { verifyCommand } from './commands/verify.js';
 import { reportCommand } from './commands/report.js';
 import { loginCommand, logoutCommand, whoamiCommand } from './commands/login.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(await fs.readFile(path.join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string };
+
 const program = new Command();
-program.name('o2n').description('Obsidian vault を Notion へ移行するツール').version('0.1.0');
+program.name('o2n').description('Obsidian vault を Notion へ移行するツール').version(pkg.version);
 
 program
   .command('login')
