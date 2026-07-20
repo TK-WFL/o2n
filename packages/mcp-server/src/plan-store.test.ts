@@ -8,7 +8,8 @@ let testRoot: string;
 let vaultPath: string;
 
 beforeEach(async () => {
-  testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-plan-store-'));
+  const createdRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-plan-store-'));
+  testRoot = await fs.realpath(createdRoot);
   vaultPath = path.join(testRoot, 'vault');
   await fs.mkdir(vaultPath);
   await fs.writeFile(path.join(vaultPath, 'Note.md'), '# Note');

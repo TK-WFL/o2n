@@ -66,15 +66,22 @@ old state before resuming a migration created by an older unsafe version.
   directory identity is revalidated before content is returned.
 - Explicit plan-file reads validate every directory segment from the filesystem root through the
   parent and reject higher-ancestor symlinks, including those with existing descendants.
+- Security-sensitive paths accept only current-user- or root-owned POSIX ancestors that are not
+  group/other writable. A root-owned sticky directory (such as canonical `/tmp`) is allowed only
+  when every following segment is current-user-owned and not group/other writable; user-owned
+  writable sticky directories receive no exception.
 - Writes reject symlink destinations and verify canonical containment before same-directory atomic
   replacement. Custom plan output validates every parent segment from the filesystem root, creates
-  missing segments one at a time, and rejects symlink ancestors even when deeper directories exist.
+  missing segments as current-user-owned `0700` directories, and rejects symlink ancestors even
+  when deeper directories exist. Existing directories are never chmodded to manufacture trust.
 - Atomic writes verify the temporary path and opened handle have the same single-link inode before
   writing, then verify the renamed destination still has that inode before reporting success.
   Temporary and destination files must retain the requested `0600` mode for vault, custom-plan,
   and home-secret writes, regardless of whether an owner check applies.
   Validation failures do not unlink by pathname, avoiding removal of an attacker-replaced inode;
   an untrusted or incomplete temporary file may remain for manual cleanup.
+- Ancestry trust is revalidated before file opens and before/after atomic replacement. Platforms
+  without an effective/current UID API fail closed for these security-sensitive operations.
 - MCP requires `O2N_ALLOWED_VAULTS` and compares `realpath()` values exactly.
 - MCP real writes require `O2N_ENABLE_MCP_WRITE=1` and a matching `O2N_MCP_WRITE_TOKEN`.
 - `start_migration` is disabled; use `prepare_migration` and `commit_migration`.
@@ -101,3 +108,4 @@ OAuth code exchange only and does not read vault contents.
   ownership, permission, and hard-link requirements.
 - Extended explicit plan reads to validate the complete parent ancestry.
 - Enforced atomic file modes for vault and custom-plan writes as well as home secrets.
+- Added current-user/root ancestry trust checks with a narrowly scoped root-sticky exception.

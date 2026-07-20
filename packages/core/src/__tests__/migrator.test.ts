@@ -153,7 +153,8 @@ function extractFileBlocks(markdown: string, pageId: string) {
 let tmpDir: string;
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-migrator-test-'));
+  const createdRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-migrator-test-'));
+  tmpDir = await fs.realpath(createdRoot);
   await fs.mkdir(path.join(tmpDir, 'Sub'), { recursive: true });
   await fs.writeFile(path.join(tmpDir, 'Root.md'), '# Root\n\n[[Sub Note]]\n');
   await fs.writeFile(path.join(tmpDir, 'Sub', 'Sub Note.md'), '# Sub Note\n\n![[pic.png]]\n\n[[Root]]\n');

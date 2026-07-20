@@ -9,7 +9,8 @@ let testRoot: string;
 let homePath: string;
 
 beforeEach(async () => {
-  testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-credentials-'));
+  const createdRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-credentials-'));
+  testRoot = await fs.realpath(createdRoot);
   homePath = path.join(testRoot, 'home');
   await fs.mkdir(homePath);
   vi.spyOn(os, 'homedir').mockReturnValue(homePath);
@@ -138,6 +139,18 @@ describe('credentials local storage', () => {
     await fs.chmod(directoryPath, 0o777);
 
     await expect(readHomeStateFile('state-signing-key')).rejects.toThrow();
+  });
+
+  it('home上位のuser-owned 0777 non-sticky ancestorを拒否する', async () => {
+    const writableAncestor = path.join(testRoot, 'writable-home-parent');
+    const untrustedHome = path.join(writableAncestor, 'home');
+    await fs.mkdir(untrustedHome, { recursive: true });
+    await fs.chmod(writableAncestor, 0o777);
+    vi.mocked(os.homedir).mockReturnValue(untrustedHome);
+
+    await expect(
+      saveCredentials({ token: 'secret', savedAt: '2026-07-20T00:00:00Z' }),
+    ).rejects.toThrow();
   });
 
   it('0600かつ単一linkの秘密ファイルは正常に読める', async () => {

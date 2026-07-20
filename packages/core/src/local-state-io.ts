@@ -26,6 +26,12 @@ interface OpenDirectory {
   ino: number | bigint;
   ownerUid?: number;
   forbidGroupOtherWrite?: boolean;
+  trustUid?: number;
+  requireCurrentOwner?: boolean;
+  afterStickyRoot?: boolean;
+  noFollowFlag?: number;
+  finalMode?: number;
+  finalRequireCurrentOwner?: boolean;
 }
 
 export interface NoFollowReadOptions {
@@ -91,6 +97,30 @@ function assertNoGroupOtherWrite(targetPath: string, stat: Stats): void {
   }
 }
 
+function assertTrustedDirectory(
+  targetPath: string,
+  stat: Stats,
+  effectiveUid: number,
+  requireCurrentOwner: boolean,
+): boolean {
+  if (!stat.isDirectory()) throw securityError(targetPath, '通常のディレクトリではありません');
+  const ownedByCurrentUser = stat.uid === effectiveUid;
+  const ownedByRoot = stat.uid === 0;
+  if (!ownedByCurrentUser && !ownedByRoot) {
+    throw securityError(targetPath, '信頼できないユーザーが所有するancestorです');
+  }
+  if (requireCurrentOwner && !ownedByCurrentUser) {
+    throw securityError(targetPath, 'sticky root配下は現在ユーザー所有である必要があります');
+  }
+
+  const groupOrOtherWritable = (stat.mode & 0o022) !== 0;
+  const rootOwnedSticky = ownedByRoot && (stat.mode & 0o1000) !== 0;
+  if (groupOrOtherWritable && !rootOwnedSticky) {
+    throw securityError(targetPath, '信頼できないwritable ancestorです');
+  }
+  return requireCurrentOwner || rootOwnedSticky;
+}
+
 function assertSecretFile(targetPath: string, stat: Stats, expectedUid: number): void {
   if (!stat.isFile() || stat.nlink !== 1) {
     throw securityError(targetPath, '単一リンクの通常ファイルではありません');
@@ -129,6 +159,8 @@ async function openDirectory(
     noFollowFlag?: number;
     ownerUid?: number;
     forbidGroupOtherWrite?: boolean;
+    trustUid?: number;
+    requireCurrentOwner?: boolean;
   },
 ): Promise<OpenDirectory> {
   if (options.create) {
@@ -160,14 +192,37 @@ async function openDirectory(
     if (await fs.realpath(directoryPath) !== canonicalPath) {
       throw securityError(directoryPath, 'I/O中にディレクトリの参照先が変化しました');
     }
+    let afterStickyRoot: boolean | undefined;
+    if (options.trustUid !== undefined) {
+      const openedAfterSticky = assertTrustedDirectory(
+        directoryPath,
+        opened,
+        options.trustUid,
+        options.requireCurrentOwner ?? false,
+      );
+      const pathAfterSticky = assertTrustedDirectory(
+        directoryPath,
+        after,
+        options.trustUid,
+        options.requireCurrentOwner ?? false,
+      );
+      afterStickyRoot = openedAfterSticky || pathAfterSticky;
+    }
     if (options.ownerUid !== undefined) {
       assertSecureOwner(directoryPath, opened, options.ownerUid);
     }
     if (options.forbidGroupOtherWrite) {
       assertNoGroupOtherWrite(directoryPath, opened);
     }
-    if (options.mode !== undefined) await handle.chmod(options.mode);
     const secured = await handle.stat();
+    if (options.trustUid !== undefined) {
+      afterStickyRoot = afterStickyRoot || assertTrustedDirectory(
+        directoryPath,
+        secured,
+        options.trustUid,
+        options.requireCurrentOwner ?? false,
+      );
+    }
     if (options.ownerUid !== undefined) {
       assertSecureOwner(directoryPath, secured, options.ownerUid);
     }
@@ -185,6 +240,10 @@ async function openDirectory(
       ino: opened.ino,
       ownerUid: options.ownerUid,
       forbidGroupOtherWrite: options.forbidGroupOtherWrite,
+      trustUid: options.trustUid,
+      requireCurrentOwner: options.requireCurrentOwner,
+      afterStickyRoot,
+      noFollowFlag,
     };
   } catch (error) {
     await handle.close();
@@ -194,9 +253,15 @@ async function openDirectory(
 
 async function openDirectoryTree(
   directoryPath: string,
-  createMissing: boolean,
-  noFollowFlag = NOFOLLOW,
+  options: {
+    createMissing: boolean;
+    noFollowFlag?: number;
+    effectiveUid: number;
+    finalMode?: number;
+    finalRequireCurrentOwner?: boolean;
+  },
 ): Promise<OpenDirectory> {
+  const noFollowFlag = options.noFollowFlag ?? NOFOLLOW;
   const resolvedDirectory = path.resolve(directoryPath);
   const filesystemRoot = path.parse(resolvedDirectory).root;
   const relativePath = path.relative(filesystemRoot, resolvedDirectory);
@@ -208,23 +273,35 @@ async function openDirectoryTree(
   let directory = await openDirectory(filesystemRoot, {
     create: false,
     noFollowFlag,
+    trustUid: options.effectiveUid,
   });
   try {
-    for (const segment of segments) {
+    for (const [index, segment] of segments.entries()) {
       await assertDirectoryUnchanged(directory);
       const childPath = path.join(directory.canonicalPath, segment);
-      if (createMissing) {
+      let created = false;
+      if (options.createMissing) {
         try {
           await fs.mkdir(childPath, { mode: 0o700 });
+          created = true;
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         }
       }
 
+      const isFinal = index === segments.length - 1;
+      const requireCurrentOwner = Boolean(
+        directory.afterStickyRoot
+        || created
+        || (isFinal && options.finalRequireCurrentOwner),
+      );
       const child = await openDirectory(childPath, {
         create: false,
         canonicalParent: directory.canonicalPath,
         noFollowFlag,
+        mode: created ? 0o700 : (isFinal ? options.finalMode : undefined),
+        trustUid: options.effectiveUid,
+        requireCurrentOwner,
       });
       try {
         await assertDirectoryUnchanged(directory);
@@ -235,6 +312,8 @@ async function openDirectoryTree(
         throw error;
       }
     }
+    directory.finalMode = options.finalMode;
+    directory.finalRequireCurrentOwner = options.finalRequireCurrentOwner;
     return directory;
   } catch (error) {
     await directory.handle.close();
@@ -258,6 +337,34 @@ async function assertDirectoryUnchanged(directory: OpenDirectory): Promise<void>
   if (directory.forbidGroupOtherWrite) {
     assertNoGroupOtherWrite(directory.path, current);
   }
+  if (directory.trustUid !== undefined) {
+    assertTrustedDirectory(
+      directory.path,
+      current,
+      directory.trustUid,
+      directory.requireCurrentOwner ?? false,
+    );
+  }
+}
+
+async function assertTrustedAncestryUnchanged(directory: OpenDirectory): Promise<void> {
+  await assertDirectoryUnchanged(directory);
+  if (directory.trustUid === undefined) return;
+
+  const reopened = await openDirectoryTree(directory.path, {
+    createMissing: false,
+    noFollowFlag: directory.noFollowFlag,
+    effectiveUid: directory.trustUid,
+    finalMode: directory.finalMode,
+    finalRequireCurrentOwner: directory.finalRequireCurrentOwner,
+  });
+  try {
+    if (reopened.dev !== directory.dev || reopened.ino !== directory.ino) {
+      throw securityError(directory.path, 'ancestor再検証中に最終directoryが置き換えられました');
+    }
+  } finally {
+    await reopened.handle.close();
+  }
 }
 
 async function openVaultStateDirectory(
@@ -265,15 +372,29 @@ async function openVaultStateDirectory(
   create: boolean,
   noFollowFlag?: number,
 ): Promise<OpenDirectory> {
-  const canonicalVault = await fs.realpath(vaultPath);
-  const vaultStat = await fs.stat(canonicalVault);
-  if (!vaultStat.isDirectory()) throw securityError(vaultPath, 'vaultがディレクトリではありません');
-  return openDirectory(path.join(canonicalVault, '.o2n'), {
-    create,
-    mode: 0o700,
-    canonicalParent: canonicalVault,
+  const effectiveUid = currentUserId();
+  const vaultDirectory = await openDirectoryTree(path.resolve(vaultPath), {
+    createMissing: false,
     noFollowFlag,
+    effectiveUid,
   });
+  try {
+    const stateDirectory = await openDirectoryTree(path.join(vaultDirectory.canonicalPath, '.o2n'), {
+      createMissing: create,
+      noFollowFlag,
+      effectiveUid,
+      finalMode: 0o700,
+    });
+    try {
+      await assertDirectoryUnchanged(vaultDirectory);
+      return stateDirectory;
+    } catch (error) {
+      await stateDirectory.handle.close();
+      throw error;
+    }
+  } finally {
+    await vaultDirectory.handle.close();
+  }
 }
 
 async function openHomeStateDirectory(
@@ -281,16 +402,33 @@ async function openHomeStateDirectory(
   noFollowFlag?: number,
   expectedUid?: number,
 ): Promise<OpenDirectory> {
-  const canonicalHome = await fs.realpath(os.homedir());
   const ownerUid = currentUserId(expectedUid);
-  return openDirectory(path.join(canonicalHome, '.o2n'), {
-    create,
-    mode: 0o700,
-    canonicalParent: canonicalHome,
+  const homeDirectory = await openDirectoryTree(path.resolve(os.homedir()), {
+    createMissing: false,
     noFollowFlag,
-    ownerUid,
-    forbidGroupOtherWrite: true,
+    effectiveUid: ownerUid,
+    finalRequireCurrentOwner: true,
   });
+  try {
+    const directory = await openDirectoryTree(path.join(homeDirectory.canonicalPath, '.o2n'), {
+      createMissing: create,
+      noFollowFlag,
+      effectiveUid: ownerUid,
+      finalMode: 0o700,
+      finalRequireCurrentOwner: true,
+    });
+    try {
+      await assertDirectoryUnchanged(homeDirectory);
+      directory.ownerUid = ownerUid;
+      directory.forbidGroupOtherWrite = true;
+      return directory;
+    } catch (error) {
+      await directory.handle.close();
+      throw error;
+    }
+  } finally {
+    await homeDirectory.handle.close();
+  }
 }
 
 async function assertRegularDestination(filePath: string): Promise<void> {
@@ -310,7 +448,7 @@ async function readFromDirectory(
   secretOwnerUid?: number,
 ): Promise<string> {
   const filePath = path.join(directory.path, fileName);
-  await assertDirectoryUnchanged(directory);
+  await assertTrustedAncestryUnchanged(directory);
   const before = await fs.lstat(filePath);
   if (before.isSymbolicLink()) throw securityError(filePath, 'シンボリックリンクは使用できません');
   if (!before.isFile()) throw securityError(filePath, '通常ファイルではありません');
@@ -327,7 +465,7 @@ async function readFromDirectory(
       assertSecretFile(filePath, opened, secretOwnerUid);
       assertSecretFile(filePath, afterOpen, secretOwnerUid);
     }
-    await assertDirectoryUnchanged(directory);
+    await assertTrustedAncestryUnchanged(directory);
     const content = await handle.readFile('utf-8');
     const afterRead = await fs.lstat(filePath);
     if (afterRead.isSymbolicLink() || !afterRead.isFile()) {
@@ -337,7 +475,7 @@ async function readFromDirectory(
     if (secretOwnerUid !== undefined) {
       assertSecretFile(filePath, afterRead, secretOwnerUid);
     }
-    await assertDirectoryUnchanged(directory);
+    await assertTrustedAncestryUnchanged(directory);
     return content;
   } finally {
     await handle.close();
@@ -385,7 +523,7 @@ async function verifyRenamedDestination(
   expected: Stats,
   mode: number,
 ): Promise<void> {
-  await assertDirectoryUnchanged(directory);
+  await assertTrustedAncestryUnchanged(directory);
   const before = await fs.lstat(destination);
   if (before.isSymbolicLink()) throw securityError(destination, 'シンボリックリンクは使用できません');
   assertSingleLinkIdentity(destination, expected, before);
@@ -400,7 +538,7 @@ async function verifyRenamedDestination(
     assertAtomicFilePolicy(directory, destination, opened, mode);
     assertAtomicFilePolicy(directory, destination, after, mode);
     assertSameEntry(destination, before, opened, after);
-    await assertDirectoryUnchanged(directory);
+    await assertTrustedAncestryUnchanged(directory);
   } finally {
     await handle.close();
   }
@@ -414,6 +552,7 @@ async function atomicWriteToDirectory(
   options: AtomicWriteOptions = {},
 ): Promise<void> {
   const destination = path.join(directory.path, fileName);
+  await assertTrustedAncestryUnchanged(directory);
   await assertRegularDestination(destination);
 
   const temporary = path.join(
@@ -441,7 +580,7 @@ async function atomicWriteToDirectory(
     assertSingleLinkIdentity(temporary, opened, atPath);
     assertAtomicFilePolicy(directory, temporary, opened, mode);
     assertAtomicFilePolicy(directory, temporary, atPath, mode);
-    await assertDirectoryUnchanged(directory);
+    await assertTrustedAncestryUnchanged(directory);
     await handle.writeFile(content, 'utf-8');
     await handle.sync();
     const afterWrite = await handle.stat();
@@ -450,7 +589,7 @@ async function atomicWriteToDirectory(
     assertSingleLinkIdentity(temporary, opened, afterWritePath);
     assertAtomicFilePolicy(directory, temporary, afterWrite, mode);
     assertAtomicFilePolicy(directory, temporary, afterWritePath, mode);
-    await assertDirectoryUnchanged(directory);
+    await assertTrustedAncestryUnchanged(directory);
   } finally {
     await handle.close();
   }
@@ -458,7 +597,7 @@ async function atomicWriteToDirectory(
   if (!temporaryIdentity) {
     throw securityError(temporary, '一時ファイルのidentityを取得できませんでした');
   }
-  await assertDirectoryUnchanged(directory);
+  await assertTrustedAncestryUnchanged(directory);
   await assertRegularDestination(destination);
   const beforeRename = await fs.lstat(temporary);
   assertSingleLinkIdentity(temporary, temporaryIdentity, beforeRename);
@@ -531,7 +670,7 @@ export async function removeHomeStateFile(fileName: HomeStateFileName): Promise<
     const stat = await fs.lstat(filePath);
     if (stat.isSymbolicLink()) throw securityError(filePath, 'シンボリックリンクは使用できません');
     if (!stat.isFile()) throw securityError(filePath, '通常ファイルではありません');
-    await assertDirectoryUnchanged(directory);
+    await assertTrustedAncestryUnchanged(directory);
     await fs.unlink(filePath);
   } finally {
     await directory.handle.close();
@@ -544,7 +683,11 @@ export async function readRegularFileNoFollow(
 ): Promise<string> {
   const resolvedPath = path.resolve(filePath);
   const noFollowFlag = options.noFollowFlag ?? NOFOLLOW;
-  const directory = await openDirectoryTree(path.dirname(resolvedPath), false, noFollowFlag);
+  const directory = await openDirectoryTree(path.dirname(resolvedPath), {
+    createMissing: false,
+    noFollowFlag,
+    effectiveUid: currentUserId(),
+  });
   try {
     await options.testHooks?.afterParentOpen?.(directory.path);
     return await readFromDirectory(directory, path.basename(resolvedPath), noFollowFlag);
@@ -553,13 +696,27 @@ export async function readRegularFileNoFollow(
   }
 }
 
+export async function validateTrustedDirectoryAncestry(
+  directoryPath: string,
+  expectedUid?: number,
+): Promise<void> {
+  const directory = await openDirectoryTree(directoryPath, {
+    createMissing: false,
+    effectiveUid: currentUserId(expectedUid),
+  });
+  await directory.handle.close();
+}
+
 export async function atomicWriteRegularFileNoFollow(
   filePath: string,
   content: string,
   options: AtomicWriteOptions = {},
 ): Promise<void> {
   const resolvedPath = path.resolve(filePath);
-  const directory = await openDirectoryTree(path.dirname(resolvedPath), true);
+  const directory = await openDirectoryTree(path.dirname(resolvedPath), {
+    createMissing: true,
+    effectiveUid: currentUserId(),
+  });
   try {
     await atomicWriteToDirectory(directory, path.basename(resolvedPath), content, 0o600, options);
   } finally {

@@ -7,6 +7,7 @@ import {
   atomicWriteVaultStateFile,
   readRegularFileNoFollow,
   readVaultStateFile,
+  validateTrustedDirectoryAncestry,
 } from '../local-state-io.js';
 
 let testRoot: string;
@@ -125,6 +126,83 @@ describe('vault local state I/O', () => {
       readRegularFileNoFollow(path.relative(process.cwd(), planPath)),
     ).resolves.toBe('{"version":1}');
   });
+
+  it.skipIf(typeof process.geteuid !== 'function')(
+    'root-owned 0755 filesystem rootをtrusted ancestorとして許可する',
+    async () => {
+      const filesystemRoot = path.parse(testRoot).root;
+      const rootStat = await fs.stat(filesystemRoot);
+      expect(rootStat.uid).toBe(0);
+      expect(rootStat.mode & 0o777).toBe(0o755);
+
+      await expect(
+        validateTrustedDirectoryAncestry(filesystemRoot),
+      ).resolves.toBeUndefined();
+    },
+  );
+
+  it('user-owned 0777 non-sticky ancestorを拒否する', async () => {
+    const writableAncestor = path.join(testRoot, 'writable-ancestor');
+    const planPath = path.join(writableAncestor, 'existing', 'plan.json');
+    const untrustedVault = path.join(writableAncestor, 'vault');
+    await fs.mkdir(path.dirname(planPath), { recursive: true });
+    await fs.mkdir(untrustedVault);
+    await fs.writeFile(planPath, '{"version":1}');
+    await fs.chmod(writableAncestor, 0o777);
+
+    await expect(readRegularFileNoFollow(planPath)).rejects.toThrow();
+    await expect(
+      atomicWriteRegularFileNoFollow(path.join(writableAncestor, 'output', 'plan.json'), '{}'),
+    ).rejects.toThrow();
+    await expect(
+      atomicWriteVaultStateFile(untrustedVault, 'state.json', '{}'),
+    ).rejects.toThrow();
+  });
+
+  it('user-owned writable sticky ancestorをroot sticky例外として扱わない', async () => {
+    const writableSticky = path.join(testRoot, 'user-sticky');
+    await fs.mkdir(writableSticky, { mode: 0o700 });
+    await fs.chmod(writableSticky, 0o1777);
+
+    await expect(
+      validateTrustedDirectoryAncestry(writableSticky),
+    ).rejects.toThrow();
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'root-owned sticky /tmpとcurrent-user-owned 0700 childを許可する',
+    async () => {
+      const canonicalTmp = await fs.realpath('/tmp');
+      const tmpStat = await fs.stat(canonicalTmp);
+      expect(tmpStat.uid).toBe(0);
+      expect(tmpStat.mode & 0o1000).toBe(0o1000);
+      const trustedChild = await fs.mkdtemp(path.join(canonicalTmp, 'o2n-trusted-'));
+      try {
+        await fs.chmod(trustedChild, 0o700);
+        await expect(
+          validateTrustedDirectoryAncestry(trustedChild),
+        ).resolves.toBeUndefined();
+      } finally {
+        await fs.rm(trustedChild, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32' || typeof process.geteuid !== 'function')(
+    'root-owned sticky配下の別UID所有childを拒否する',
+    async () => {
+      const canonicalTmp = await fs.realpath('/tmp');
+      const child = await fs.mkdtemp(path.join(canonicalTmp, 'o2n-untrusted-'));
+      try {
+        await fs.chmod(child, 0o700);
+        await expect(
+          validateTrustedDirectoryAncestry(child, process.geteuid!() + 1),
+        ).rejects.toThrow();
+      } finally {
+        await fs.rm(child, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('parent open後の上位祖先差替えを外部plan読取りとして成功扱いしない', async () => {
     const safeAncestor = path.join(testRoot, 'safe-read', 'ancestor');
