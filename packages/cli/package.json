@@ -1,6 +1,6 @@
 {
   "name": "@tk_wfl/o2n-cli",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Obsidian vaultをNotionへ移行するCLI（npx @tk_wfl/o2n-cli）",
   "type": "module",
   "license": "MIT",
