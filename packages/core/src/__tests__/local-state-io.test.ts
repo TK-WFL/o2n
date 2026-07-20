@@ -155,4 +155,67 @@ describe('vault local state I/O', () => {
 
     expect(await fs.readFile(outputPath, 'utf-8')).toBe('{"version":1}');
   });
+
+  it('temp open後にparentが差し替えられたら秘密を書かず別inodeをcleanupしない', async () => {
+    const stateDirectory = path.join(vaultPath, '.o2n');
+    const movedDirectory = path.join(vaultPath, '.o2n-moved');
+    let attackerTemporary = '';
+
+    await expect(
+      atomicWriteVaultStateFile(vaultPath, 'plan.json', 'secret plan', {
+        testHooks: {
+          afterTemporaryOpen: async ({ temporaryPath }) => {
+            await fs.rename(stateDirectory, movedDirectory);
+            await fs.mkdir(stateDirectory, { mode: 0o700 });
+            attackerTemporary = temporaryPath;
+            await fs.writeFile(attackerTemporary, 'attacker-owned');
+          },
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect(await fs.readFile(attackerTemporary, 'utf-8')).toBe('attacker-owned');
+    const movedEntries = await fs.readdir(movedDirectory);
+    const openedTemporary = movedEntries.find((entry) => entry.includes('.plan.json.tmp-'));
+    expect(openedTemporary).toBeDefined();
+    expect(
+      await fs.readFile(path.join(movedDirectory, openedTemporary!), 'utf-8'),
+    ).toBe('');
+  });
+
+  it('rename直後にdestination inodeが差し替えられたら成功扱いしない', async () => {
+    const replacedDestination = path.join(vaultPath, '.o2n', 'replaced-plan.json');
+    let destinationPath = '';
+
+    await expect(
+      atomicWriteVaultStateFile(vaultPath, 'plan.json', 'secret plan', {
+        testHooks: {
+          afterRename: async (context) => {
+            destinationPath = context.destinationPath;
+            await fs.rename(destinationPath, replacedDestination);
+            await fs.writeFile(destinationPath, 'attacker replacement');
+          },
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect(await fs.readFile(destinationPath, 'utf-8')).toBe('attacker replacement');
+    expect(await fs.readFile(replacedDestination, 'utf-8')).toBe('secret plan');
+  });
+
+  it('tempへhardlinkが追加されたら秘密を書き込まない', async () => {
+    const hardlinkPath = path.join(vaultPath, 'temp-hardlink');
+
+    await expect(
+      atomicWriteVaultStateFile(vaultPath, 'state.json', 'secret state', {
+        testHooks: {
+          afterTemporaryOpen: async ({ temporaryPath }) => {
+            await fs.link(temporaryPath, hardlinkPath);
+          },
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect(await fs.readFile(hardlinkPath, 'utf-8')).toBe('');
+  });
 });

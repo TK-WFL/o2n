@@ -92,4 +92,59 @@ describe('credentials local storage', () => {
       ).rejects.toThrow();
     },
   );
+
+  it.each(['credentials.json', 'state-signing-key'] as const)(
+    '%sがhardlinkなら読取りを拒否する',
+    async (fileName) => {
+      const secretPath = path.join(homePath, '.o2n', fileName);
+      await fs.mkdir(path.dirname(secretPath), { mode: 0o700 });
+      await fs.writeFile(secretPath, 'secret', { mode: 0o600 });
+      await fs.link(secretPath, path.join(testRoot, `${fileName}.hardlink`));
+
+      await expect(readHomeStateFile(fileName)).rejects.toThrow();
+    },
+  );
+
+  it.each(['credentials.json', 'state-signing-key'] as const)(
+    '%sが0644なら読取りを拒否する',
+    async (fileName) => {
+      const secretPath = path.join(homePath, '.o2n', fileName);
+      await fs.mkdir(path.dirname(secretPath), { mode: 0o700 });
+      await fs.writeFile(secretPath, 'secret', { mode: 0o600 });
+      await fs.chmod(secretPath, 0o644);
+
+      await expect(readHomeStateFile(fileName)).rejects.toThrow();
+    },
+  );
+
+  it.skipIf(typeof process.geteuid !== 'function')(
+    '秘密ファイルが期待したuser所有でなければ読取りを拒否する',
+    async () => {
+      const secretPath = path.join(homePath, '.o2n', 'state-signing-key');
+      await fs.mkdir(path.dirname(secretPath), { mode: 0o700 });
+      await fs.writeFile(secretPath, 'secret', { mode: 0o600 });
+      const currentUid = process.geteuid!();
+
+      await expect(
+        readHomeStateFile('state-signing-key', { expectedFileUid: currentUid + 1 }),
+      ).rejects.toThrow();
+    },
+  );
+
+  it('~/.o2nがgroup/other書込み可能なら秘密を読まない', async () => {
+    const directoryPath = path.join(homePath, '.o2n');
+    await fs.mkdir(directoryPath, { mode: 0o700 });
+    await fs.writeFile(path.join(directoryPath, 'state-signing-key'), 'secret', { mode: 0o600 });
+    await fs.chmod(directoryPath, 0o777);
+
+    await expect(readHomeStateFile('state-signing-key')).rejects.toThrow();
+  });
+
+  it('0600かつ単一linkの秘密ファイルは正常に読める', async () => {
+    const directoryPath = path.join(homePath, '.o2n');
+    await fs.mkdir(directoryPath, { mode: 0o700 });
+    await fs.writeFile(path.join(directoryPath, 'state-signing-key'), 'secret', { mode: 0o600 });
+
+    await expect(readHomeStateFile('state-signing-key')).resolves.toBe('secret');
+  });
 });

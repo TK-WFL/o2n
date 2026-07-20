@@ -51,7 +51,9 @@ User-home files:
 
 - `~/.o2n/credentials.json`: optional Notion token from `o2n login`, mode `0600`.
 - `~/.o2n/state-signing-key`: local HMAC key for state v2, mode `0600`.
-- `~/.o2n` has mode `0700`. Existing symlinks are rejected for the directory and both files.
+- `~/.o2n` has mode `0700`, must be owned by the current user, and cannot be group/other writable.
+  Both secret files must be current-user-owned regular files with one hard link and no group/other
+  permissions. Platforms that cannot expose an equivalent current-user ownership check fail closed.
 
 Unsigned v1 state is rejected by migration write paths. Users must discard or explicitly migrate
 old state before resuming a migration created by an older unsafe version.
@@ -65,6 +67,10 @@ old state before resuming a migration created by an older unsafe version.
 - Writes reject symlink destinations and verify canonical containment before same-directory atomic
   replacement. Custom plan output validates every parent segment from the filesystem root, creates
   missing segments one at a time, and rejects symlink ancestors even when deeper directories exist.
+- Atomic writes verify the temporary path and opened handle have the same single-link inode before
+  writing, then verify the renamed destination still has that inode before reporting success.
+  Validation failures do not unlink by pathname, avoiding removal of an attacker-replaced inode;
+  an untrusted or incomplete temporary file may remain for manual cleanup.
 - MCP requires `O2N_ALLOWED_VAULTS` and compares `realpath()` values exactly.
 - MCP real writes require `O2N_ENABLE_MCP_WRITE=1` and a matching `O2N_MCP_WRITE_TOKEN`.
 - `start_migration` is disabled; use `prepare_migration` and `commit_migration`.
@@ -87,3 +93,5 @@ OAuth code exchange only and does not read vault contents.
   and stopped automatic plan creation for errors other than a missing `plan.json`.
 - Added no-follow fallback identity checks and safe recursive parent creation for custom plan output.
 - Extended custom output ancestry checks from the filesystem root through the final parent.
+- Bound atomic temporary and destination names to one verified inode and hardened home-secret
+  ownership, permission, and hard-link requirements.
