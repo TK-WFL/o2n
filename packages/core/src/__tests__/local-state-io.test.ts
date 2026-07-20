@@ -85,6 +85,71 @@ describe('vault local state I/O', () => {
     expect(fileStat.mode & 0o777).toBe(0o600);
   });
 
+  it.each(['plan.json', 'report.md', 'state.json'] as const)(
+    'legacy 0755 .o2nと0644 %sを安全に0700/0600へ縮小して読める',
+    async (fileName) => {
+      const stateDirectory = path.join(vaultPath, '.o2n');
+      const filePath = path.join(stateDirectory, fileName);
+      await fs.mkdir(stateDirectory, { mode: 0o755 });
+      await fs.writeFile(filePath, 'legacy content', { mode: 0o644 });
+      await fs.chmod(stateDirectory, 0o755);
+      await fs.chmod(filePath, 0o644);
+
+      await expect(readVaultStateFile(vaultPath, fileName)).resolves.toBe('legacy content');
+      expect((await fs.stat(stateDirectory)).mode & 0o777).toBe(0o700);
+      expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
+    },
+  );
+
+  it.each(['plan.json', 'report.md', 'state.json'] as const)(
+    'legacy 0755 .o2nを0700へ縮小して%sをatomic writeできる',
+    async (fileName) => {
+      const stateDirectory = path.join(vaultPath, '.o2n');
+      await fs.mkdir(stateDirectory, { mode: 0o755 });
+      await fs.chmod(stateDirectory, 0o755);
+
+      await atomicWriteVaultStateFile(vaultPath, fileName, 'new content');
+
+      expect((await fs.stat(stateDirectory)).mode & 0o777).toBe(0o700);
+      expect((await fs.stat(path.join(stateDirectory, fileName))).mode & 0o777).toBe(0o600);
+    },
+  );
+
+  it.each([0o775, 0o777])(
+    'group/other writableなlegacy .o2n (%o)を移行せず拒否する',
+    async (legacyMode) => {
+      const stateDirectory = path.join(vaultPath, '.o2n');
+      await fs.mkdir(stateDirectory, { mode: 0o700 });
+      await fs.chmod(stateDirectory, legacyMode);
+
+      await expect(
+        atomicWriteVaultStateFile(vaultPath, 'state.json', '{}'),
+      ).rejects.toThrow();
+      expect((await fs.stat(stateDirectory)).mode & 0o777).toBe(legacyMode);
+    },
+  );
+
+  it('legacy .o2n mode縮小直前のidentity raceを拒否する', async () => {
+    const stateDirectory = path.join(vaultPath, '.o2n');
+    const movedDirectory = path.join(vaultPath, '.o2n-before-tighten');
+    await fs.mkdir(stateDirectory, { mode: 0o755 });
+    await fs.chmod(stateDirectory, 0o755);
+
+    await expect(
+      atomicWriteVaultStateFile(vaultPath, 'state.json', '{}', {
+        testHooks: {
+          beforeDirectoryModeTighten: async () => {
+            await fs.rename(stateDirectory, movedDirectory);
+            await fs.mkdir(stateDirectory, { mode: 0o755 });
+          },
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect((await fs.stat(movedDirectory)).mode & 0o777).toBe(0o755);
+    expect((await fs.stat(stateDirectory)).mode & 0o777).toBe(0o755);
+  });
+
   it('O_NOFOLLOWなしでも任意plan pathのsymlink読取りを拒否する', async () => {
     const outsidePlan = path.join(testRoot, 'outside-custom-plan.json');
     const planLink = path.join(testRoot, 'custom-plan.json');

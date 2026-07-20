@@ -33,6 +33,94 @@ describe('credentials local storage', () => {
     expect(fileStat.mode & 0o777).toBe(0o600);
   });
 
+  it('legacy 0755 ~/.o2nを0700へ縮小してcredentialsを読める', async () => {
+    const directoryPath = path.join(homePath, '.o2n');
+    const credentials = { token: 'legacy-token', savedAt: '2026-07-20T00:00:00Z' };
+    await fs.mkdir(directoryPath, { mode: 0o755 });
+    await fs.writeFile(
+      path.join(directoryPath, 'credentials.json'),
+      JSON.stringify(credentials),
+      { mode: 0o600 },
+    );
+    await fs.chmod(directoryPath, 0o755);
+
+    await expect(loadCredentials()).resolves.toEqual(credentials);
+    expect((await fs.stat(directoryPath)).mode & 0o777).toBe(0o700);
+  });
+
+  it('legacy 0755 ~/.o2nを0700へ縮小してsigning keyを読める', async () => {
+    const directoryPath = path.join(homePath, '.o2n');
+    await fs.mkdir(directoryPath, { mode: 0o755 });
+    await fs.writeFile(path.join(directoryPath, 'state-signing-key'), 'legacy-key', { mode: 0o600 });
+    await fs.chmod(directoryPath, 0o755);
+
+    await expect(readHomeStateFile('state-signing-key')).resolves.toBe('legacy-key');
+    expect((await fs.stat(directoryPath)).mode & 0o777).toBe(0o700);
+  });
+
+  it('legacy 0755 ~/.o2nを縮小してhome secretsを書ける', async () => {
+    const directoryPath = path.join(homePath, '.o2n');
+    await fs.mkdir(directoryPath, { mode: 0o755 });
+    await fs.chmod(directoryPath, 0o755);
+
+    await saveCredentials({ token: 'new-token', savedAt: '2026-07-20T00:00:00Z' });
+    await atomicWriteHomeStateFile('state-signing-key', 'new-key');
+
+    expect((await fs.stat(directoryPath)).mode & 0o777).toBe(0o700);
+    expect((await fs.stat(path.join(directoryPath, 'credentials.json'))).mode & 0o777).toBe(0o600);
+    expect((await fs.stat(path.join(directoryPath, 'state-signing-key'))).mode & 0o777).toBe(0o600);
+  });
+
+  it.each([0o775, 0o777])(
+    'group/other writableなlegacy ~/.o2n (%o)を拒否する',
+    async (legacyMode) => {
+      const directoryPath = path.join(homePath, '.o2n');
+      await fs.mkdir(directoryPath, { mode: 0o700 });
+      await fs.chmod(directoryPath, legacyMode);
+
+      await expect(
+        saveCredentials({ token: 'secret', savedAt: '2026-07-20T00:00:00Z' }),
+      ).rejects.toThrow();
+      expect((await fs.stat(directoryPath)).mode & 0o777).toBe(legacyMode);
+    },
+  );
+
+  it('legacy ~/.o2n mode縮小直前のidentity raceを拒否する', async () => {
+    const directoryPath = path.join(homePath, '.o2n');
+    const movedDirectory = path.join(homePath, '.o2n-before-tighten');
+    await fs.mkdir(directoryPath, { mode: 0o755 });
+    await fs.chmod(directoryPath, 0o755);
+
+    await expect(
+      atomicWriteHomeStateFile('credentials.json', '{}', {
+        testHooks: {
+          beforeDirectoryModeTighten: async () => {
+            await fs.rename(directoryPath, movedDirectory);
+            await fs.mkdir(directoryPath, { mode: 0o755 });
+          },
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect((await fs.stat(movedDirectory)).mode & 0o777).toBe(0o755);
+    expect((await fs.stat(directoryPath)).mode & 0o777).toBe(0o755);
+  });
+
+  it.skipIf(typeof process.geteuid !== 'function')(
+    '期待UIDと異なるlegacy home treeを移行しない',
+    async () => {
+      const directoryPath = path.join(homePath, '.o2n');
+      await fs.mkdir(directoryPath, { mode: 0o755 });
+      await fs.writeFile(path.join(directoryPath, 'state-signing-key'), 'key', { mode: 0o600 });
+      await fs.chmod(directoryPath, 0o755);
+
+      await expect(
+        readHomeStateFile('state-signing-key', { expectedUid: process.geteuid!() + 1 }),
+      ).rejects.toThrow();
+      expect((await fs.stat(directoryPath)).mode & 0o777).toBe(0o755);
+    },
+  );
+
   it('~/.o2n自体がsymlinkなら資格情報を外部へ保存しない', async () => {
     const outsideDirectory = path.join(testRoot, 'outside');
     await fs.mkdir(outsideDirectory);

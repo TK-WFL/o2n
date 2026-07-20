@@ -38,6 +38,7 @@ export interface NoFollowReadOptions {
   noFollowFlag?: number;
   testHooks?: {
     afterParentOpen?: (parentPath: string) => Promise<void>;
+    beforeDirectoryModeTighten?: (directoryPath: string) => Promise<void>;
   };
 }
 
@@ -57,6 +58,7 @@ export interface AtomicWriteOptions {
     afterTemporaryOpen?: (context: AtomicWriteTestContext) => Promise<void>;
     beforeTemporaryValidation?: (context: AtomicWriteTestContext) => Promise<void>;
     afterRename?: (context: AtomicWriteTestContext) => Promise<void>;
+    beforeDirectoryModeTighten?: (directoryPath: string) => Promise<void>;
   };
 }
 
@@ -161,6 +163,11 @@ async function openDirectory(
     forbidGroupOtherWrite?: boolean;
     trustUid?: number;
     requireCurrentOwner?: boolean;
+    tightenMode?: {
+      targetMode: number;
+      effectiveUid: number;
+      beforeTighten?: (directoryPath: string) => Promise<void>;
+    };
   },
 ): Promise<OpenDirectory> {
   if (options.create) {
@@ -214,6 +221,53 @@ async function openDirectory(
     if (options.forbidGroupOtherWrite) {
       assertNoGroupOtherWrite(directoryPath, opened);
     }
+    if (
+      options.tightenMode
+      && (opened.mode & 0o777) !== options.tightenMode.targetMode
+    ) {
+      assertSecureOwner(directoryPath, opened, options.tightenMode.effectiveUid);
+      assertNoGroupOtherWrite(directoryPath, opened);
+      assertSecureOwner(directoryPath, after, options.tightenMode.effectiveUid);
+      assertNoGroupOtherWrite(directoryPath, after);
+      await options.tightenMode.beforeTighten?.(directoryPath);
+
+      const beforeTighten = await handle.stat();
+      const beforeTightenPath = await fs.lstat(directoryPath);
+      assertSameEntry(directoryPath, opened, beforeTighten, beforeTightenPath);
+      if (
+        opened.nlink !== beforeTighten.nlink
+        || beforeTighten.nlink !== beforeTightenPath.nlink
+      ) {
+        throw securityError(directoryPath, 'mode移行前にdirectory link数が変化しました');
+      }
+      assertSecureOwner(directoryPath, beforeTighten, options.tightenMode.effectiveUid);
+      assertNoGroupOtherWrite(directoryPath, beforeTighten);
+      await handle.chmod(options.tightenMode.targetMode);
+
+      const tightened = await handle.stat();
+      const tightenedPath = await fs.lstat(directoryPath);
+      assertSameEntry(directoryPath, opened, tightened, tightenedPath);
+      if (opened.nlink !== tightened.nlink || tightened.nlink !== tightenedPath.nlink) {
+        throw securityError(directoryPath, 'mode移行中にdirectory link数が変化しました');
+      }
+      assertSecureOwner(directoryPath, tightened, options.tightenMode.effectiveUid);
+      assertSecureOwner(directoryPath, tightenedPath, options.tightenMode.effectiveUid);
+      if (
+        (tightened.mode & 0o777) !== options.tightenMode.targetMode
+        || (tightenedPath.mode & 0o777) !== options.tightenMode.targetMode
+      ) {
+        throw securityError(directoryPath, 'legacy directory modeを安全に縮小できませんでした');
+      }
+      if (options.trustUid !== undefined) {
+        assertTrustedDirectory(
+          directoryPath,
+          tightenedPath,
+          options.trustUid,
+          options.requireCurrentOwner ?? false,
+        );
+      }
+    }
+
     const secured = await handle.stat();
     if (options.trustUid !== undefined) {
       afterStickyRoot = afterStickyRoot || assertTrustedDirectory(
@@ -259,6 +313,7 @@ async function openDirectoryTree(
     effectiveUid: number;
     finalMode?: number;
     finalRequireCurrentOwner?: boolean;
+    beforeDirectoryModeTighten?: (directoryPath: string) => Promise<void>;
   },
 ): Promise<OpenDirectory> {
   const noFollowFlag = options.noFollowFlag ?? NOFOLLOW;
@@ -299,9 +354,16 @@ async function openDirectoryTree(
         create: false,
         canonicalParent: directory.canonicalPath,
         noFollowFlag,
-        mode: created ? 0o700 : (isFinal ? options.finalMode : undefined),
+        mode: created ? 0o700 : undefined,
         trustUid: options.effectiveUid,
         requireCurrentOwner,
+        tightenMode: isFinal && !created && options.finalMode !== undefined
+          ? {
+              targetMode: options.finalMode,
+              effectiveUid: options.effectiveUid,
+              beforeTighten: options.beforeDirectoryModeTighten,
+            }
+          : undefined,
       });
       try {
         await assertDirectoryUnchanged(directory);
@@ -371,6 +433,7 @@ async function openVaultStateDirectory(
   vaultPath: string,
   create: boolean,
   noFollowFlag?: number,
+  beforeDirectoryModeTighten?: (directoryPath: string) => Promise<void>,
 ): Promise<OpenDirectory> {
   const effectiveUid = currentUserId();
   const vaultDirectory = await openDirectoryTree(path.resolve(vaultPath), {
@@ -384,9 +447,11 @@ async function openVaultStateDirectory(
       noFollowFlag,
       effectiveUid,
       finalMode: 0o700,
+      beforeDirectoryModeTighten,
     });
     try {
       await assertDirectoryUnchanged(vaultDirectory);
+      await assertTrustedAncestryUnchanged(stateDirectory);
       return stateDirectory;
     } catch (error) {
       await stateDirectory.handle.close();
@@ -401,6 +466,7 @@ async function openHomeStateDirectory(
   create: boolean,
   noFollowFlag?: number,
   expectedUid?: number,
+  beforeDirectoryModeTighten?: (directoryPath: string) => Promise<void>,
 ): Promise<OpenDirectory> {
   const ownerUid = currentUserId(expectedUid);
   const homeDirectory = await openDirectoryTree(path.resolve(os.homedir()), {
@@ -416,11 +482,13 @@ async function openHomeStateDirectory(
       effectiveUid: ownerUid,
       finalMode: 0o700,
       finalRequireCurrentOwner: true,
+      beforeDirectoryModeTighten,
     });
     try {
       await assertDirectoryUnchanged(homeDirectory);
       directory.ownerUid = ownerUid;
       directory.forbidGroupOtherWrite = true;
+      await assertTrustedAncestryUnchanged(directory);
       return directory;
     } catch (error) {
       await directory.handle.close();
@@ -441,11 +509,39 @@ async function assertRegularDestination(filePath: string): Promise<void> {
   }
 }
 
+async function tightenLegacyVaultFileMode(
+  filePath: string,
+  handle: FileHandle,
+  opened: Stats,
+  atPath: Stats,
+  effectiveUid: number,
+): Promise<void> {
+  if ((opened.mode & 0o777) === 0o600 && (atPath.mode & 0o777) === 0o600) return;
+  if (!opened.isFile() || opened.nlink !== 1 || !atPath.isFile() || atPath.nlink !== 1) {
+    throw securityError(filePath, 'legacy vault fileが単一リンクの通常ファイルではありません');
+  }
+  assertSecureOwner(filePath, opened, effectiveUid);
+  assertSecureOwner(filePath, atPath, effectiveUid);
+  assertNoGroupOtherWrite(filePath, opened);
+  assertNoGroupOtherWrite(filePath, atPath);
+  await handle.chmod(0o600);
+
+  const tightened = await handle.stat();
+  const tightenedPath = await fs.lstat(filePath);
+  assertSameEntry(filePath, opened, tightened, tightenedPath);
+  assertSecureOwner(filePath, tightened, effectiveUid);
+  assertSecureOwner(filePath, tightenedPath, effectiveUid);
+  if ((tightened.mode & 0o777) !== 0o600 || (tightenedPath.mode & 0o777) !== 0o600) {
+    throw securityError(filePath, 'legacy vault file modeを安全に縮小できませんでした');
+  }
+}
+
 async function readFromDirectory(
   directory: OpenDirectory,
   fileName: string,
   noFollowFlag = NOFOLLOW,
   secretOwnerUid?: number,
+  legacyModeOwnerUid?: number,
 ): Promise<string> {
   const filePath = path.join(directory.path, fileName);
   await assertTrustedAncestryUnchanged(directory);
@@ -461,6 +557,15 @@ async function readFromDirectory(
       throw securityError(filePath, '通常ファイルではありません');
     }
     assertSameEntry(filePath, before, opened, afterOpen);
+    if (legacyModeOwnerUid !== undefined) {
+      await tightenLegacyVaultFileMode(
+        filePath,
+        handle,
+        opened,
+        afterOpen,
+        legacyModeOwnerUid,
+      );
+    }
     if (secretOwnerUid !== undefined) {
       assertSecretFile(filePath, opened, secretOwnerUid);
       assertSecretFile(filePath, afterOpen, secretOwnerUid);
@@ -613,9 +718,20 @@ export async function readVaultStateFile(
   options: NoFollowReadOptions = {},
 ): Promise<string> {
   const noFollowFlag = options.noFollowFlag ?? NOFOLLOW;
-  const directory = await openVaultStateDirectory(vaultPath, false, noFollowFlag);
+  const directory = await openVaultStateDirectory(
+    vaultPath,
+    false,
+    noFollowFlag,
+    options.testHooks?.beforeDirectoryModeTighten,
+  );
   try {
-    return await readFromDirectory(directory, fileName, noFollowFlag);
+    return await readFromDirectory(
+      directory,
+      fileName,
+      noFollowFlag,
+      undefined,
+      directory.trustUid,
+    );
   } finally {
     await directory.handle.close();
   }
@@ -627,7 +743,12 @@ export async function atomicWriteVaultStateFile(
   content: string,
   options: AtomicWriteOptions = {},
 ): Promise<void> {
-  const directory = await openVaultStateDirectory(vaultPath, true);
+  const directory = await openVaultStateDirectory(
+    vaultPath,
+    true,
+    undefined,
+    options.testHooks?.beforeDirectoryModeTighten,
+  );
   try {
     await atomicWriteToDirectory(directory, fileName, content, 0o600, options);
   } finally {
@@ -642,7 +763,12 @@ export async function readHomeStateFile(
   const noFollowFlag = options.noFollowFlag ?? NOFOLLOW;
   const ownerUid = currentUserId(options.expectedUid);
   const fileOwnerUid = currentUserId(options.expectedFileUid);
-  const directory = await openHomeStateDirectory(false, noFollowFlag, ownerUid);
+  const directory = await openHomeStateDirectory(
+    false,
+    noFollowFlag,
+    ownerUid,
+    options.testHooks?.beforeDirectoryModeTighten,
+  );
   try {
     return await readFromDirectory(directory, fileName, noFollowFlag, fileOwnerUid);
   } finally {
@@ -655,7 +781,12 @@ export async function atomicWriteHomeStateFile(
   content: string,
   options: AtomicWriteOptions = {},
 ): Promise<void> {
-  const directory = await openHomeStateDirectory(true);
+  const directory = await openHomeStateDirectory(
+    true,
+    undefined,
+    undefined,
+    options.testHooks?.beforeDirectoryModeTighten,
+  );
   try {
     await atomicWriteToDirectory(directory, fileName, content, 0o600, options);
   } finally {

@@ -54,6 +54,9 @@ User-home files:
 - `~/.o2n` has mode `0700`, must be owned by the current user, and cannot be group/other writable.
   Both secret files must be current-user-owned regular files with one hard link and no group/other
   permissions. Platforms that cannot expose an equivalent current-user ownership check fail closed.
+- Legacy current-user-owned `.o2n` directories with no group/other write bits (for example `0755`
+  or `0750`) are tightened in place to `0700` after identity checks. Writable, differently owned,
+  or replaced directories are rejected rather than migrated.
 
 Unsigned v1 state is rejected by migration write paths. Users must discard or explicitly migrate
 old state before resuming a migration created by an older unsafe version.
@@ -82,6 +85,10 @@ old state before resuming a migration created by an older unsafe version.
   an untrusted or incomplete temporary file may remain for manual cleanup.
 - Ancestry trust is revalidated before file opens and before/after atomic replacement. Platforms
   without an effective/current UID API fail closed for these security-sensitive operations.
+- Legacy vault-local `plan.json`, `state.json`, and `report.md` files may be tightened from `0644`
+  to `0600` only when current-user-owned, single-linked, and not group/other writable. This migration
+  cannot undo any exposure that occurred before tightening and does not apply to home secrets,
+  whose `0600` requirement remains fail-closed on read.
 - MCP requires `O2N_ALLOWED_VAULTS` and compares `realpath()` values exactly.
 - MCP real writes require `O2N_ENABLE_MCP_WRITE=1` and a matching `O2N_MCP_WRITE_TOKEN`.
 - `start_migration` is disabled; use `prepare_migration` and `commit_migration`.
@@ -109,3 +116,4 @@ OAuth code exchange only and does not read vault contents.
 - Extended explicit plan reads to validate the complete parent ancestry.
 - Enforced atomic file modes for vault and custom-plan writes as well as home secrets.
 - Added current-user/root ancestry trust checks with a narrowly scoped root-sticky exception.
+- Added identity-checked mode tightening for legacy `.o2n` directories and vault-local state files.
