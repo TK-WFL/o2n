@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { OAuthSessions } from '../src/index.js';
+import authProxy, { OAuthSessions } from '../src/index.js';
 import {
   MAX_REQUEST_BODY_BYTES,
+  REQUEST_BODY_TOO_LARGE,
   SESSION_TTL_MS,
   enforceRateLimit,
   isOAuthReady,
@@ -77,11 +78,15 @@ describe('OAuth security helpers', () => {
     await expect(enforceRateLimit(undefined, 'key')).resolves.toBe('unavailable');
   });
 
-  it('JSON以外と上限超過bodyを拒否する', async () => {
+  it('JSON以外、bodyなし、上限超過bodyを拒否する', async () => {
     const wrongType = new Request('https://example.test/session', {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: '{}',
+    });
+    const empty = new Request('https://example.test/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
     });
     const oversized = new Request('https://example.test/session', {
       method: 'POST',
@@ -90,6 +95,100 @@ describe('OAuth security helpers', () => {
     });
 
     await expect(readBoundedJson(wrongType)).resolves.toBeNull();
-    await expect(readBoundedJson(oversized)).resolves.toBeNull();
+    await expect(readBoundedJson(empty)).resolves.toBeNull();
+    await expect(readBoundedJson(oversized)).resolves.toBe(REQUEST_BODY_TOO_LARGE);
+  });
+
+  it('Content-Lengthなしの大容量streamを上限到達時にcancelする', async () => {
+    let producedChunks = 0;
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        producedChunks += 1;
+        controller.enqueue(new Uint8Array(512));
+        if (producedChunks === 10) controller.close();
+      },
+      cancel,
+    });
+    const request = new Request('https://example.test/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      duplex: 'half',
+    } as RequestInit);
+
+    await expect(readBoundedJson(request)).resolves.toBe(REQUEST_BODY_TOO_LARGE);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(producedChunks).toBeLessThan(10);
+  });
+
+  it('上限超過Content-Lengthはbodyを読む前に拒否する', async () => {
+    const request = new Request('https://example.test/session', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': String(MAX_REQUEST_BODY_BYTES + 1),
+      },
+      body: '{}',
+    });
+
+    await expect(readBoundedJson(request)).resolves.toBe(REQUEST_BODY_TOO_LARGE);
+    expect(request.bodyUsed).toBe(false);
+  });
+
+  it('上限内で断片化されたJSON streamを受け付ける', async () => {
+    const encoded = new TextEncoder().encode(JSON.stringify({ value: 'ok' }));
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoded.slice(0, 2));
+        controller.enqueue(encoded.slice(2, 7));
+        controller.enqueue(encoded.slice(7));
+        controller.close();
+      },
+    });
+    const request = new Request('https://example.test/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      duplex: 'half',
+    } as RequestInit);
+
+    await expect(readBoundedJson(request)).resolves.toEqual({ value: 'ok' });
+  });
+
+  it('偽の小さいContent-Lengthでも実bodyの累計上限で拒否する', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_REQUEST_BODY_BYTES));
+        controller.enqueue(new Uint8Array(1));
+        controller.close();
+      },
+    });
+    const request = new Request('https://example.test/session', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': '1',
+      },
+      body,
+      duplex: 'half',
+    } as RequestInit);
+
+    await expect(readBoundedJson(request)).resolves.toBe(REQUEST_BODY_TOO_LARGE);
+  });
+
+  it('公開endpointは上限超過を固定413エラーで返す', async () => {
+    const request = new Request('https://example.test/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: 'x'.repeat(MAX_REQUEST_BODY_BYTES) }),
+    });
+
+    const response = await authProxy.fetch(request, readyBindings() as never);
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: 'request_too_large',
+      message: 'The request could not be processed.',
+    });
   });
 });

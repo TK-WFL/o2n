@@ -95,8 +95,10 @@ old state before resuming a migration created by an older unsafe version.
 - Browser OAuth is disabled unless `O2N_ENABLE_BROWSER_LOGIN=1`.
 - The auth proxy additionally requires `OAUTH_ENABLED=1`, both Cloudflare Rate Limiting bindings,
   the Durable Object binding, Client ID, and Client Secret. A missing runtime binding fails closed.
-- `/session` and `/exchange` accept only bounded JSON requests and apply per-source Cloudflare rate limits;
-  the random state, one-time handoff code, and terminal-local secret remain the authorization controls.
+- `/session` and `/exchange` accept only bounded JSON requests and apply per-source Cloudflare rate limits.
+  Request bodies are streamed and rejected with HTTP 413 as soon as they exceed 2 KiB, independently of
+  `Content-Length`; the random state, one-time handoff code, and terminal-local secret remain the
+  authorization controls.
 - OAuth handoff state and tokens are held in a Durable Object for at most five minutes after registration or
   completion. An alarm, cancellation, too many failed exchanges, or a successful one-time exchange deletes
   all session storage; successful exchange also clears the alarm.
@@ -116,6 +118,7 @@ OAuth code exchange only and does not read vault contents.
 - Disabled vulnerable OAuth polling and added loopback handoff.
 - Hardened OAuth Durable Object cleanup, bounded API inputs, abuse controls, fail-closed bindings, and
   one-time secret comparison; upgraded Wrangler to an audit-clean 4.112.0-compatible release.
+- Streamed OAuth JSON body validation so missing or forged `Content-Length` cannot force unbounded buffering.
 - Added signed state v2 and plan/state schema validation.
 - Hardened MCP path and write boundaries.
 - Prevented `.o2n` and user-home credential symlinks from reading or overwriting arbitrary files,

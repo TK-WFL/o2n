@@ -2,6 +2,7 @@ import {
   enforceRateLimit,
   isOAuthReady,
   readBoundedJson,
+  REQUEST_BODY_TOO_LARGE,
   sessionExpiresAt,
   sha256Hex,
   timingSafeEqualHex,
@@ -98,6 +99,11 @@ function publicError(error: string, status: number): Response {
   return json({ error, message: PUBLIC_ERROR_MESSAGE }, status);
 }
 
+async function readJsonBody(request: Request): Promise<unknown | null | Response> {
+  const body = await readBoundedJson(request);
+  return body === REQUEST_BODY_TOO_LARGE ? publicError('request_too_large', 413) : body;
+}
+
 function sessionStub(env: Env, state: string): DurableObjectStub {
   const id = env.OAUTH_SESSIONS.idFromName(state);
   return env.OAUTH_SESSIONS.get(id);
@@ -160,7 +166,9 @@ async function handleSession(request: Request, env: Env): Promise<Response> {
   const limited = await rateLimitResponse(request, env.SESSION_RATE_LIMITER, 'session');
   if (limited) return limited;
 
-  const body = await readBoundedJson(request) as Partial<RegisterSessionRequest> | null;
+  const parsedBody = await readJsonBody(request);
+  if (parsedBody instanceof Response) return parsedBody;
+  const body = parsedBody as Partial<RegisterSessionRequest> | null;
   if (
     !body ||
     !validateState(body.state) ||
@@ -276,7 +284,9 @@ async function handleExchange(request: Request, env: Env): Promise<Response> {
   const limited = await rateLimitResponse(request, env.EXCHANGE_RATE_LIMITER, 'exchange');
   if (limited) return limited;
 
-  const body = await readBoundedJson(request) as {
+  const parsedBody = await readJsonBody(request);
+  if (parsedBody instanceof Response) return parsedBody;
+  const body = parsedBody as {
     state?: unknown;
     handoffCode?: unknown;
     sessionSecret?: unknown;
@@ -346,7 +356,9 @@ export class OAuthSessions {
   }
 
   private async register(request: Request): Promise<Response> {
-    const body = await readBoundedJson(request) as Partial<RegisterSessionRequest> | null;
+    const parsedBody = await readJsonBody(request);
+    if (parsedBody instanceof Response) return parsedBody;
+    const body = parsedBody as Partial<RegisterSessionRequest> | null;
     if (
       !body ||
       !validateState(body.state) ||
@@ -384,7 +396,9 @@ export class OAuthSessions {
     const session = await this.current();
     if (!session) return json({ error: 'not_found' }, 404);
 
-    const body = await readBoundedJson(request) as Partial<CompleteSessionRequest> | null;
+    const parsedBody = await readJsonBody(request);
+    if (parsedBody instanceof Response) return parsedBody;
+    const body = parsedBody as Partial<CompleteSessionRequest> | null;
     if (
       !body ||
       typeof body.token !== 'string' ||
@@ -422,7 +436,9 @@ export class OAuthSessions {
       return json({ error: 'not_found' }, 404);
     }
 
-    const body = await readBoundedJson(request) as Partial<ExchangeRequest> | null;
+    const parsedBody = await readJsonBody(request);
+    if (parsedBody instanceof Response) return parsedBody;
+    const body = parsedBody as Partial<ExchangeRequest> | null;
     if (!body || !validateHandoffCode(body.handoffCode) || !validateSessionSecret(body.sessionSecret)) {
       return publicError('invalid_request', 400);
     }

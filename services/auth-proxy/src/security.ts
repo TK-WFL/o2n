@@ -1,5 +1,6 @@
 export const SESSION_TTL_MS = 5 * 60 * 1000;
 export const MAX_REQUEST_BODY_BYTES = 2_048;
+export const REQUEST_BODY_TOO_LARGE = Symbol('request_body_too_large');
 
 export interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>;
@@ -52,17 +53,48 @@ export function isJsonRequest(request: Request): boolean {
   return contentType?.split(';', 1)[0]?.trim().toLowerCase() === 'application/json';
 }
 
-export async function readBoundedJson(request: Request): Promise<unknown | null> {
+export async function readBoundedJson(
+  request: Request,
+): Promise<unknown | null | typeof REQUEST_BODY_TOO_LARGE> {
   if (!isJsonRequest(request)) return null;
 
   const declaredLength = request.headers.get('content-length');
   if (declaredLength !== null) {
     const length = Number(declaredLength);
-    if (!Number.isSafeInteger(length) || length < 0 || length > MAX_REQUEST_BODY_BYTES) return null;
+    if (!Number.isSafeInteger(length) || length < 0) return null;
+    if (length > MAX_REQUEST_BODY_BYTES) return REQUEST_BODY_TOO_LARGE;
   }
 
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength === 0 || bytes.byteLength > MAX_REQUEST_BODY_BYTES) return null;
+  const reader = request.body?.getReader();
+  if (!reader) return null;
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_REQUEST_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return REQUEST_BODY_TOO_LARGE;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (totalBytes === 0) return null;
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
 
   try {
     const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
