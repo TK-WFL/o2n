@@ -205,6 +205,28 @@ describe('migrator 3パス統合テスト（モック）', () => {
     expect(calls.some((c) => c.method === 'DELETE' && /\/blocks\//.test(c.path))).toBe(true);
   });
 
+  it('同じ添付ファイルへの2箇所以上の参照が両方とも解決される（回帰テスト）', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'DoubleEmbed.md'),
+      '# Double Embed\n\n1つ目: ![[pic.png]]\n\n2つ目: ![[pic.png]]\n',
+    );
+    const { fetchImpl, calls } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+    const state = await StateStore.load(tmpDir, 'root-page');
+
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+
+    expect(state.getNote('DoubleEmbed.md')?.status).toBe('done');
+    // 添付ブロック挿入(PATCH .../children)とプレースホルダー削除(DELETE)がそれぞれ2回ずつ呼ばれること
+    const appendCalls = calls.filter((c) => c.method === 'PATCH' && /\/blocks\/.+\/children$/.test(c.path));
+    const deleteCalls = calls.filter((c) => c.method === 'DELETE' && /\/blocks\//.test(c.path));
+    expect(appendCalls.length).toBeGreaterThanOrEqual(2);
+    expect(deleteCalls.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('429を人工的に発生させてもバックオフして完走する', async () => {
     const { fetchImpl, triggerNext429, calls } = createMockServer();
     const inventory = await scanVault(tmpDir);

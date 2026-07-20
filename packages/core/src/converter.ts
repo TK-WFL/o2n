@@ -211,7 +211,10 @@ function convertWikiLinks(
     }
 
     if (isEmbed && !ext) {
-      // ノート埋め込み（トランスクルージョン非対応→リンク降格）
+      // ノート埋め込み（トランスクルージョン非対応→リンク降格）。
+      // §16検証済み（実ワークスペース）: <callout>はブロック要素のため、箇条書き行などに
+      // インラインで出現すると周辺のcallout構造ごと壊れることが判明。calloutは使わず、
+      // 他の降格ケース（見出しリンク等）と同様にプレーンなリンクテキストにする。
       const resolved = ctx.resolveNoteLink(target);
       const displayText = alias?.trim() || target;
       entries.push({
@@ -221,11 +224,11 @@ function convertWikiLinks(
       });
       if (!resolved) {
         entries.push({ category: 'unresolved_link', path: ctx.sourcePath, message: `埋め込みリンク先 "${target}" が見つかりませんでした` });
-        return `<callout icon="📎" color="gray_bg">埋め込み: ${displayText}</callout>`;
+        return `埋め込み: ${displayText}`;
       }
       const placeholder = makeLinkPlaceholder();
-      pendingLinks.push({ placeholder, targetPath: resolved, fallbackText: `${displayText}`, displayText: `埋め込み: ${displayText}` });
-      return `<callout icon="📎" color="gray_bg">埋め込み: ${placeholder}</callout>`;
+      pendingLinks.push({ placeholder, targetPath: resolved, fallbackText: `埋め込み: ${displayText}`, displayText: `埋め込み: ${displayText}` });
+      return placeholder;
     }
 
     // 通常のノートリンク（見出し/ブロック参照/エイリアス対応）

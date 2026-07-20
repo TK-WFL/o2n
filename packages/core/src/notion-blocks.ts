@@ -13,7 +13,16 @@ export function buildFrontmatterMetaCallout(frontmatter: Record<string, unknown>
   if (keys.length === 0) return '';
   const lines = keys.map((k) => {
     const v = frontmatter[k];
-    const rendered = Array.isArray(v) ? v.join(', ') : typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v);
+    // gray-matter(js-yaml)は無引用のYYYY-MM-DD等をDate型にパースするため、
+    // JSON.stringifyされた不格好な引用符付きISO文字列にならないよう先に判定する
+    const rendered =
+      v instanceof Date
+        ? v.toISOString().slice(0, 10)
+        : Array.isArray(v)
+          ? v.join(', ')
+          : typeof v === 'object' && v !== null
+            ? JSON.stringify(v)
+            : String(v);
     return `${k}: ${rendered}`;
   });
   // §16検証済み（2026-07-19）: callout内の複数行は\nではなく<br>で区切る必要がある。

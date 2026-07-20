@@ -46,9 +46,10 @@ describe('convertNote §6 変換表', () => {
     expect(result.pendingFiles[0]?.targetPath).toBe('Attachments/document.pdf');
   });
 
-  it('![[ノート]]（ノート埋め込み）はcalloutリンクに降格する', () => {
+  it('![[ノート]]（ノート埋め込み）はプレーンなリンクに降格する（calloutは使わない、ブロック要素がインラインに出ると壊れるため）', () => {
     const result = convertNote('![[Note B]]', ctx());
-    expect(result.markdown).toContain('<callout icon="📎"');
+    expect(result.markdown).not.toContain('<callout');
+    expect(result.pendingLinks[0]?.displayText).toBe('埋め込み: Note B');
     expect(result.entries.some((e) => e.message.includes('ノート埋め込み'))).toBe(true);
   });
 

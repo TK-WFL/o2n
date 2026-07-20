@@ -399,7 +399,13 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       if (!file.targetPath) continue; // 未解決添付はPass1で警告済み
 
       const existingFile = state.getFile(file.targetPath);
-      if (existingFile?.status === 'attached' || existingFile?.status === 'skipped') continue; // resumeで既に完了済み
+      // 'skipped'（サイズ超過）はファイル単位で確定した結果なので毎回スキップする。
+      // 'attached'はこのファイル自体のアップロードが完了済みという意味でしかなく、
+      // 同じファイルへの2箇所目以降の埋め込み（別のplaceholder）はまだブロック置換が
+      // 済んでいない可能性があるため、ここでは早期continueしない（実ワークスペースで
+      // 発覚した不具合: 同じ添付を複数回参照すると2回目以降のプレースホルダーが
+      // 置換されないまま残っていた）。
+      if (existingFile?.status === 'skipped') continue;
 
       let fileUploadId = existingFile?.fileUploadId;
 
