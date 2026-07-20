@@ -1,11 +1,11 @@
-import { promises as fs } from 'node:fs';
-import { scanVault, statePath, type StateFile } from '@tk_wfl/o2n-core';
+import { readVaultStateFile, scanVault, type StateFile } from '@tk_wfl/o2n-core';
 
 export async function verifyCommand(vaultPath: string): Promise<number> {
   let state: StateFile;
   try {
-    state = JSON.parse(await fs.readFile(statePath(vaultPath), 'utf-8')) as StateFile;
-  } catch {
+    state = JSON.parse(await readVaultStateFile(vaultPath, 'state.json')) as StateFile;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     console.error('state.jsonが見つかりません。先に migrate を実行してください。');
     return 2;
   }

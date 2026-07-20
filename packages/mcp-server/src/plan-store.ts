@@ -1,18 +1,20 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
-import { scanVault, buildPlan, parseMigrationPlan, type MigrationPlan } from '@tk_wfl/o2n-core';
-
-function planPath(vaultPath: string): string {
-  return path.join(vaultPath, '.o2n', 'plan.json');
-}
+import {
+  atomicWriteVaultStateFile,
+  buildPlan,
+  parseMigrationPlan,
+  readVaultStateFile,
+  scanVault,
+  type MigrationPlan,
+} from '@tk_wfl/o2n-core';
 
 export async function loadOrCreatePlan(vaultPath: string, parentPageId?: string): Promise<MigrationPlan> {
   try {
-    const raw = await fs.readFile(planPath(vaultPath), 'utf-8');
+    const raw = await readVaultStateFile(vaultPath, 'plan.json');
     const plan = parseMigrationPlan(JSON.parse(raw));
     if (parentPageId) plan.parentPageId = parentPageId;
     return plan;
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     const inventory = await scanVault(vaultPath);
     const plan = buildPlan(inventory, { parentPageId: parentPageId ?? '' });
     await savePlan(vaultPath, plan);
@@ -21,7 +23,5 @@ export async function loadOrCreatePlan(vaultPath: string, parentPageId?: string)
 }
 
 export async function savePlan(vaultPath: string, plan: MigrationPlan): Promise<void> {
-  const p = planPath(vaultPath);
-  await fs.mkdir(path.dirname(p), { recursive: true });
-  await fs.writeFile(p, JSON.stringify(plan, null, 2), 'utf-8');
+  await atomicWriteVaultStateFile(vaultPath, 'plan.json', JSON.stringify(plan, null, 2));
 }

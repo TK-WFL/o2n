@@ -7,7 +7,8 @@ import { StateIntegrityError, StateStore, planHash, statePath } from '../state.j
 let tmpDir: string;
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-state-test-'));
+  const createdRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-state-test-'));
+  tmpDir = await fs.realpath(createdRoot);
 });
 
 afterEach(async () => {

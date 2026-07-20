@@ -12,3 +12,4 @@ export * from './report.js';
 export * from './credentials.js';
 export * from './vault-guard.js';
 export * from './schemas.js';
+export * from './local-state-io.js';

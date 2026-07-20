@@ -1,7 +1,13 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { confirm, input } from '@inquirer/prompts';
-import { scanVault, suggestFolderModes, buildPlan, type FolderPlan } from '@tk_wfl/o2n-core';
+import {
+  atomicWriteRegularFileNoFollow,
+  atomicWriteVaultStateFile,
+  buildPlan,
+  scanVault,
+  suggestFolderModes,
+  type FolderPlan,
+} from '@tk_wfl/o2n-core';
 
 export interface PlanCommandOptions {
   out?: string;
@@ -36,8 +42,12 @@ export async function planCommand(vaultPath: string, opts: PlanCommandOptions): 
   }
 
   const outPath = opts.out ?? path.join(vaultPath, '.o2n', 'plan.json');
-  await fs.mkdir(path.dirname(outPath), { recursive: true });
-  await fs.writeFile(outPath, JSON.stringify(plan, null, 2), 'utf-8');
+  const serializedPlan = JSON.stringify(plan, null, 2);
+  if (opts.out) {
+    await atomicWriteRegularFileNoFollow(outPath, serializedPlan);
+  } else {
+    await atomicWriteVaultStateFile(vaultPath, 'plan.json', serializedPlan);
+  }
   console.log(`\n計画を書き出しました: ${outPath}`);
   return outPath;
 }
