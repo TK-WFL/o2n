@@ -458,3 +458,28 @@ describe('vault local state I/O', () => {
     expect(await fs.readFile(destinationPath, 'utf-8')).toBe('safe report');
   });
 });
+
+describe('Windows互換性（回帰テスト）', () => {
+  const originalPlatform = process.platform;
+
+  function setPlatform(platform: NodeJS.Platform): void {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  }
+
+  afterEach(() => {
+    setPlatform(originalPlatform);
+  });
+
+  it('process.platform=win32ではPOSIX権限ビットの不一致で失敗しない（vault state）', async () => {
+    setPlatform('win32');
+    await atomicWriteVaultStateFile(vaultPath, 'state.json', '{"version":2}');
+    await expect(readVaultStateFile(vaultPath, 'state.json')).resolves.toBe('{"version":2}');
+  });
+
+  it('process.platform=win32では通常ファイルのwrite/readラウンドトリップが失敗しない', async () => {
+    setPlatform('win32');
+    const filePath = path.join(testRoot, 'win32-file.txt');
+    await atomicWriteRegularFileNoFollow(filePath, 'windows content');
+    await expect(readRegularFileNoFollow(filePath)).resolves.toBe('windows content');
+  });
+});

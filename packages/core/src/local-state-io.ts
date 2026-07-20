@@ -11,6 +11,23 @@ export type HomeStateFileName = 'credentials.json' | 'state-signing-key';
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 const DIRECTORY = constants.O_DIRECTORY ?? 0;
 
+/**
+ * Windows対応: fs.Stats.mode はWindows上ではPOSIXのowner/group/otherを区別せず
+ * 常に同一ビットを複製して返す（Node.js公式ドキュメント）ため、group/other書込み
+ * ビットのチェックや0600/0700への厳密一致要求はWindows上では常に失敗し、
+ * ツール自体が一切使用不能になる。Windowsではこれらのビット単位チェックには
+ * 検証上の意味がないため、win32上ではPOSIX権限ビットの一致要求のみをスキップする
+ * （symlink/所有者/ancestryの検証は影響を受けず、win32でも引き続き有効）。
+ */
+function enforcePosixMode(): boolean {
+  return process.platform !== 'win32';
+}
+
+function modeMatches(stat: Stats, mode: number): boolean {
+  if (!enforcePosixMode()) return true;
+  return (stat.mode & 0o777) === mode;
+}
+
 export class LocalStateSecurityError extends Error {
   constructor(message: string) {
     super(message);
@@ -82,6 +99,12 @@ function currentUserId(expectedUid?: number): number {
   };
   const uid = processWithUid.geteuid?.() ?? processWithUid.getuid?.();
   if (uid === undefined) {
+    // Windowsには geteuid/getuid が存在しない。Node.jsのfs.stat()もWindows上では
+    // uid/gidを常に0として返すため、所有者IDを0固定として扱えばこの後の
+    // assertSecureOwner等の比較は自然に整合する（Windowsでは所有者検証という
+    // 概念自体がPOSIXほど意味を持たないため、fail-closedで全機能を止めるのではなく
+    // Node標準のuid=0規約に合わせてフォールバックする）。
+    if (process.platform === 'win32') return 0;
     throw new LocalStateSecurityError('現在ユーザーの所有者IDを検証できない環境です');
   }
   return uid;
@@ -94,6 +117,7 @@ function assertSecureOwner(targetPath: string, stat: Stats, expectedUid: number)
 }
 
 function assertNoGroupOtherWrite(targetPath: string, stat: Stats): void {
+  if (!enforcePosixMode()) return;
   if ((stat.mode & 0o022) !== 0) {
     throw securityError(targetPath, 'group/other書込み権限が設定されています');
   }
@@ -115,7 +139,7 @@ function assertTrustedDirectory(
     throw securityError(targetPath, 'sticky root配下は現在ユーザー所有である必要があります');
   }
 
-  const groupOrOtherWritable = (stat.mode & 0o022) !== 0;
+  const groupOrOtherWritable = enforcePosixMode() && (stat.mode & 0o022) !== 0;
   const rootOwnedSticky = ownedByRoot && (stat.mode & 0o1000) !== 0;
   if (groupOrOtherWritable && !rootOwnedSticky) {
     throw securityError(targetPath, '信頼できないwritable ancestorです');
@@ -128,7 +152,7 @@ function assertSecretFile(targetPath: string, stat: Stats, expectedUid: number):
     throw securityError(targetPath, '単一リンクの通常ファイルではありません');
   }
   assertSecureOwner(targetPath, stat, expectedUid);
-  if ((stat.mode & 0o077) !== 0) {
+  if (enforcePosixMode() && (stat.mode & 0o077) !== 0) {
     throw securityError(targetPath, '秘密ファイルの権限が0600相当ではありません');
   }
 }
@@ -223,7 +247,7 @@ async function openDirectory(
     }
     if (
       options.tightenMode
-      && (opened.mode & 0o777) !== options.tightenMode.targetMode
+      && !modeMatches(opened, options.tightenMode.targetMode)
     ) {
       assertSecureOwner(directoryPath, opened, options.tightenMode.effectiveUid);
       assertNoGroupOtherWrite(directoryPath, opened);
@@ -253,8 +277,8 @@ async function openDirectory(
       assertSecureOwner(directoryPath, tightened, options.tightenMode.effectiveUid);
       assertSecureOwner(directoryPath, tightenedPath, options.tightenMode.effectiveUid);
       if (
-        (tightened.mode & 0o777) !== options.tightenMode.targetMode
-        || (tightenedPath.mode & 0o777) !== options.tightenMode.targetMode
+        !modeMatches(tightened, options.tightenMode.targetMode)
+        || !modeMatches(tightenedPath, options.tightenMode.targetMode)
       ) {
         throw securityError(directoryPath, 'legacy directory modeを安全に縮小できませんでした');
       }
@@ -283,7 +307,7 @@ async function openDirectory(
     if (options.forbidGroupOtherWrite) {
       assertNoGroupOtherWrite(directoryPath, secured);
     }
-    if (options.mode !== undefined && (secured.mode & 0o777) !== options.mode) {
+    if (options.mode !== undefined && !modeMatches(secured, options.mode)) {
       throw securityError(directoryPath, '要求されたdirectory権限を設定できません');
     }
     return {
@@ -516,7 +540,7 @@ async function tightenLegacyVaultFileMode(
   atPath: Stats,
   effectiveUid: number,
 ): Promise<void> {
-  if ((opened.mode & 0o777) === 0o600 && (atPath.mode & 0o777) === 0o600) return;
+  if (modeMatches(opened, 0o600) && modeMatches(atPath, 0o600)) return;
   if (!opened.isFile() || opened.nlink !== 1 || !atPath.isFile() || atPath.nlink !== 1) {
     throw securityError(filePath, 'legacy vault fileが単一リンクの通常ファイルではありません');
   }
@@ -531,7 +555,7 @@ async function tightenLegacyVaultFileMode(
   assertSameEntry(filePath, opened, tightened, tightenedPath);
   assertSecureOwner(filePath, tightened, effectiveUid);
   assertSecureOwner(filePath, tightenedPath, effectiveUid);
-  if ((tightened.mode & 0o777) !== 0o600 || (tightenedPath.mode & 0o777) !== 0o600) {
+  if (!modeMatches(tightened, 0o600) || !modeMatches(tightenedPath, 0o600)) {
     throw securityError(filePath, 'legacy vault file modeを安全に縮小できませんでした');
   }
 }
@@ -617,7 +641,7 @@ function assertAtomicFilePolicy(
   if (directory.ownerUid !== undefined) {
     assertSecureOwner(targetPath, stat, directory.ownerUid);
   }
-  if ((stat.mode & 0o777) !== mode) {
+  if (!modeMatches(stat, mode)) {
     throw securityError(targetPath, 'atomicファイルの権限が要求値と一致しません');
   }
 }
