@@ -14,6 +14,20 @@ interface StoredResult {
   message?: string;
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 function html(body: string, status = 200): Response {
   return new Response(
     `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>o2n - Notion連携</title>
@@ -32,6 +46,9 @@ function json(data: unknown, status = 200): Response {
 async function handleCallback(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
+  // stateはCLI側で pollSecret のsha256ハッシュとして生成される（生の pollSecret 自体は
+  // ブラウザ/Notionには一切送られない）。ここでのKVキーはそのハッシュ値そのままでよい
+  // （poll側も同じハッシュを再計算して照合する）。
   const state = url.searchParams.get('state');
   const error = url.searchParams.get('error');
 
@@ -40,7 +57,7 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
   }
 
   if (error || !code) {
-    const result: StoredResult = { status: 'error', message: error ?? 'code が返されませんでした' };
+    const result: StoredResult = { status: 'error', message: 'Notionでの認可がキャンセルまたは拒否されました。' };
     await env.OAUTH_STATE.put(state, JSON.stringify(result), { expirationTtl: STATE_TTL_SECONDS });
     return html(`<h1>連携がキャンセルされました</h1><p>このタブは閉じて構いません。ターミナルに戻ってください。</p>`);
   }
@@ -58,8 +75,12 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
   });
 
   if (!tokenRes.ok) {
+    // セキュリティ対策（外部レビュー指摘対応）: Notion側のエラー詳細はユーザー向けの
+    // レスポンス・KV（延いてはCLIの出力）には含めない。詳細はWorkerのログにのみ残す
+    // （`wrangler tail`やCloudflareダッシュボードから確認する）。
     const errBody = await tokenRes.text();
-    const result: StoredResult = { status: 'error', message: `Notion token exchange failed: ${tokenRes.status} ${errBody}` };
+    console.error(`Notion token exchange failed: ${tokenRes.status} ${errBody}`);
+    const result: StoredResult = { status: 'error', message: 'Notionとのトークン交換に失敗しました。しばらくしてから再度お試しください。' };
     await env.OAUTH_STATE.put(state, JSON.stringify(result), { expirationTtl: STATE_TTL_SECONDS });
     return html('<h1>連携に失敗しました</h1><p>ターミナルに戻ってエラー内容を確認してください。</p>', 502);
   }
@@ -78,16 +99,25 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
   };
   await env.OAUTH_STATE.put(state, JSON.stringify(result), { expirationTtl: STATE_TTL_SECONDS });
 
+  // セキュリティ対策（外部レビュー指摘対応、反射型XSS）: Notion APIが返す workspace_name は
+  // 信頼できない外部入力のためHTMLエスケープしてから埋め込む。
+  const safeName = escapeHtml(tokenData.workspace_name ?? '');
   return html(
-    `<h1>連携が完了しました ✅</h1><p>ワークスペース「${tokenData.workspace_name ?? ''}」と連携しました。このタブを閉じて、ターミナルに戻ってください。</p>`,
+    `<h1>連携が完了しました ✅</h1><p>ワークスペース「${safeName}」と連携しました。このタブを閉じて、ターミナルに戻ってください。</p>`,
   );
 }
 
 async function handlePoll(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  const state = url.searchParams.get('state');
-  if (!state) return json({ status: 'pending' });
+  // セキュリティ対策（外部レビュー指摘対応）: ブラウザのURL・ブラウザ履歴・プロキシログ等に
+  // 残りうる `state` 単体ではポーリングを許可しない。CLIだけが保持する `pollSecret`
+  // （Notion/ブラウザには一切送られない値）を要求し、ここでそのsha256ハッシュを計算して
+  // callback側が保存したキー（= 同じハッシュ）と照合する。state を盗み見た第三者は
+  // pollSecret を復元できないため、先回りしてトークンを取得することはできない。
+  const pollSecret = url.searchParams.get('pollSecret');
+  if (!pollSecret) return json({ status: 'pending' });
 
+  const state = await sha256Hex(pollSecret);
   const raw = await env.OAUTH_STATE.get(state);
   if (!raw) return json({ status: 'pending' });
 

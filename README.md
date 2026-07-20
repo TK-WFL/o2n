@@ -136,4 +136,19 @@ npm test
 - Notionトークンは環境変数（`NOTION_TOKEN`）または`~/.o2n/credentials.json`（`o2n login`経由、パーミッション600）にのみ保存される
 - 書き込み先は指定した親ページ配下のみ
 - Vaultへの書き込みは`.o2n/`ディレクトリのみ（Vault本体は読み取り専用）
+- Vault内のシンボリックリンクは辿らない（vault外ファイルへのアクセス防止）
+- MCPサーバーは渡された`vaultPath`が実際にObsidian vault（`.obsidian`ディレクトリを持つ）か検証してから
+  読み書きする（AIエージェント経由での意図しないパスへのアクセスを防ぐ）
 - Notion API以外への通信は行わない（テレメトリなし）
+
+### `o2n login`（共有auth-proxy）の信頼モデル
+
+`o2n login`はデフォルトでTK-WFLが運用するCloudflare Worker（`o2n-auth-proxy.workflow-lab.workers.dev`）を
+経由してNotionのclient_secretを扱う。このWorkerは認可コード→トークンの交換のみを行い、Vaultの内容や
+Notionページ内容には一切アクセスしないが、**利用にはこのWorkerの運用者を信頼する必要がある**。
+ポーリング用のURLパラメータ（`pollSecret`）は推測不可能な乱数のsha256ハッシュ経由でのみ照合され、
+トークンは取得後即座にKVから削除されるため、ブラウザ履歴やログに残る値だけからトークンを
+奪取することはできない設計だが、セキュリティ要件が高い場合は`services/auth-proxy`を自分の
+Cloudflareアカウントに自己ホストし、`packages/cli/src/oauth-config.ts`のURLを差し替えることを推奨する
+（手順は[services/auth-proxy/README.md](services/auth-proxy/README.md)参照）。`NOTION_TOKEN`環境変数を
+使う方法（internal integration）はこの信頼モデルに依存しない。

@@ -140,4 +140,21 @@ See [docs/questions.md](docs/questions.md) for implementation decisions and devi
   (via `o2n login`, mode 600)
 - Writes are scoped to the specified parent page only
 - The only path o2n writes to inside the vault is `.o2n/` (the vault itself is read-only)
+- Symbolic links inside the vault are never followed (prevents reading files outside the vault)
+- The MCP server verifies that a given `vaultPath` actually looks like an Obsidian vault (has a
+  `.obsidian` directory) before reading or writing anything, to guard against an AI agent being
+  pointed at an unintended path
 - No network calls other than to the Notion API (no telemetry)
+
+### Trust model for `o2n login` (shared auth-proxy)
+
+By default, `o2n login` goes through a Cloudflare Worker operated by TK-WFL
+(`o2n-auth-proxy.workflow-lab.workers.dev`) to handle Notion's `client_secret`. This Worker only
+performs the code→token exchange and never accesses vault contents or Notion pages, but using it
+does require trusting its operator. The polling parameter (`pollSecret`) is only ever matched via
+a one-way sha256 hash, and the token is deleted from KV immediately after one successful read, so
+a value leaked through browser history or logs alone cannot be used to steal the token. If your
+security requirements call for it, self-host `services/auth-proxy` on your own Cloudflare account
+and point `packages/cli/src/oauth-config.ts` at it instead (see
+[services/auth-proxy/README.md](services/auth-proxy/README.md)). The `NOTION_TOKEN` env var path
+(internal integration) does not depend on this trust model at all.

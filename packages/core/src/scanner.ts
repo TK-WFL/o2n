@@ -28,6 +28,12 @@ function toPosix(p: string): string {
 async function walk(dir: string, root: string, out: string[]): Promise<void> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
+    // セキュリティ対策（外部レビュー指摘対応）: シンボリックリンクは辿らない。
+    // vault内に悪意あるsymlinkが置かれていた場合に、vault外のファイル
+    // （~/.ssh等）を読み取ってNotionに送信してしまうことを防ぐ。
+    // fs.readdirのDirentはリンク先を辿らないため isDirectory()/isFile() は
+    // symlinkに対して通常falseを返すが、意図を明確にするため明示的に判定する。
+    if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
       if (EXCLUDED_DIRS.has(entry.name)) continue;
       await walk(path.join(dir, entry.name), root, out);

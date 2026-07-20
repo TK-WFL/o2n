@@ -10,3 +10,4 @@ export * from './property-mapping.js';
 export * from './migrator.js';
 export * from './report.js';
 export * from './credentials.js';
+export * from './vault-guard.js';

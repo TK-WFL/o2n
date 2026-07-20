@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { saveCredentials, clearCredentials, loadCredentials } from '@tk_wfl/o2n-core';
 import { AUTH_PROXY_URL, NOTION_OAUTH_CLIENT_ID } from '../oauth-config.js';
 
@@ -8,13 +8,16 @@ function sleep(ms: number): Promise<void> {
 }
 
 function openBrowser(url: string): void {
-  const cmd =
+  // セキュリティ対策（外部レビュー指摘対応）: execにシェル文字列を組み立てて渡すと
+  // 将来の変更でシェルインジェクションの余地が生まれうるため、execFileで
+  // コマンドと引数を分離して渡す（シェルを経由しない）。
+  const [cmd, args] =
     process.platform === 'darwin'
-      ? `open "${url}"`
+      ? ['open', [url]]
       : process.platform === 'win32'
-        ? `start "" "${url}"`
-        : `xdg-open "${url}"`;
-  exec(cmd, () => {
+        ? ['cmd', ['/c', 'start', '', url]]
+        : ['xdg-open', [url]];
+  execFile(cmd, args, () => {
     // 開けなくても致命的ではない（URLを表示済みなので手動で開いてもらえる）
   });
 }
@@ -41,7 +44,13 @@ export async function loginCommand(): Promise<number> {
     return 2;
   }
 
-  const state = crypto.randomUUID();
+  // セキュリティ対策（外部レビュー指摘対応）: stateはブラウザのURL・履歴・プロキシログ等に
+  // 残りうるため、それ単体でトークンを引き出せる値にしない。ポーリングにはCLIだけが保持する
+  // pollSecret（決してブラウザ/Notionへ送らない）を使い、Notionへ送るstateはその
+  // sha256ハッシュ（一方向関数）にする。stateを知られてもpollSecretは復元できない。
+  const pollSecret = crypto.randomBytes(32).toString('hex');
+  const state = crypto.createHash('sha256').update(pollSecret).digest('hex');
+
   const authorizeUrl = new URL('https://api.notion.com/v1/oauth/authorize');
   authorizeUrl.searchParams.set('client_id', NOTION_OAUTH_CLIENT_ID);
   authorizeUrl.searchParams.set('response_type', 'code');
@@ -60,7 +69,7 @@ export async function loginCommand(): Promise<number> {
     await sleep(POLL_INTERVAL_MS);
     let data: PollResult;
     try {
-      const res = await fetch(`${AUTH_PROXY_URL}/poll?state=${encodeURIComponent(state)}`);
+      const res = await fetch(`${AUTH_PROXY_URL}/poll?pollSecret=${encodeURIComponent(pollSecret)}`);
       data = (await res.json()) as PollResult;
     } catch {
       continue; // 一時的なネットワークエラーはリトライ

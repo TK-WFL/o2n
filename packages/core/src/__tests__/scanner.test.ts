@@ -63,3 +63,31 @@ describe('scanVault (fixtures/test-vault)', () => {
     expect(inv.folderTree['Folder1']).toContain('Folder1/Note B.md');
   });
 });
+
+describe('scanVault symlinkガード（セキュリティ）', () => {
+  it('vault内のsymlinkは辿らず、vault外のファイルが結果に含まれない', async () => {
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-outside-'));
+    const secretFile = path.join(outsideDir, 'secret.md');
+    await fs.writeFile(secretFile, '# 機密情報\nvault外のファイル');
+
+    const vaultDir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-symlink-vault-'));
+    await fs.mkdir(path.join(vaultDir, '.obsidian'), { recursive: true });
+    await fs.writeFile(path.join(vaultDir, 'Normal.md'), '# 通常ノート');
+    await fs.symlink(outsideDir, path.join(vaultDir, 'evil-link'), 'dir');
+    await fs.symlink(secretFile, path.join(vaultDir, 'evil-file.md'), 'file');
+
+    try {
+      const inv = await scanVault(vaultDir);
+      const paths = inv.notes.map((n) => n.path);
+      expect(paths).toContain('Normal.md');
+      expect(paths.some((p) => p.includes('evil'))).toBe(false);
+      expect(paths.some((p) => p.includes('secret'))).toBe(false);
+    } finally {
+      await fs.rm(vaultDir, { recursive: true, force: true });
+      await fs.rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+});

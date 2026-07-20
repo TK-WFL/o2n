@@ -15,6 +15,8 @@ import {
   reportPath,
   statePath,
   loadCredentials,
+  assertObsidianVault,
+  NotAnObsidianVaultError,
   type StateFile,
 } from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
@@ -26,11 +28,26 @@ function text(content: string) {
   return { content: [{ type: 'text' as const, text: content }] };
 }
 
+/** vaultPathが実際にObsidian vaultらしいディレクトリでなければエラーを返す（任意パスアクセス対策） */
+async function guardVaultPath(vaultPath: string): Promise<{ error: ReturnType<typeof text> } | { error: null }> {
+  try {
+    await assertObsidianVault(vaultPath);
+    return { error: null };
+  } catch (err) {
+    if (err instanceof NotAnObsidianVaultError) {
+      return { error: text(err.message) };
+    }
+    throw err;
+  }
+}
+
 server.tool(
   'scan_vault',
   'Obsidian vaultを走査してインベントリ要約を返す。副作用なし（読み取りのみ）。',
   { vaultPath: z.string().describe('Obsidian vaultの絶対パス') },
   async ({ vaultPath }) => {
+    const guard = await guardVaultPath(vaultPath);
+    if (guard.error) return guard.error;
     const inventory = await scanVault(vaultPath);
     const summary = {
       vaultPath: inventory.vaultPath,
@@ -54,6 +71,8 @@ server.tool(
     parentPageId: z.string().optional().describe('移行先のNotion親ページID（未指定なら既存計画の値を使う）'),
   },
   async ({ vaultPath, parentPageId }) => {
+    const guard = await guardVaultPath(vaultPath);
+    if (guard.error) return guard.error;
     const plan = await loadOrCreatePlan(vaultPath, parentPageId);
     return text(JSON.stringify(plan, null, 2));
   },
@@ -79,6 +98,8 @@ server.tool(
       .describe('計画への部分更新'),
   },
   async ({ vaultPath, patch }) => {
+    const guard = await guardVaultPath(vaultPath);
+    if (guard.error) return guard.error;
     const plan = await loadOrCreatePlan(vaultPath);
     if (patch.parentPageId) plan.parentPageId = patch.parentPageId;
     if (patch.folders) plan.folders = patch.folders;
@@ -98,6 +119,8 @@ server.tool(
     dryRun: z.boolean().default(false).describe('trueの場合、書き込みAPIを呼ばずシミュレーションのみ行う'),
   },
   async ({ vaultPath, parentPageId, dryRun }) => {
+    const guard = await guardVaultPath(vaultPath);
+    if (guard.error) return guard.error;
     const resolved = path.resolve(vaultPath);
     const existing = getJob(resolved);
     if (existing?.status === 'running') {
@@ -163,6 +186,8 @@ server.tool(
   '進行中/完了した移行の進捗（done / failed / pending件数、現在のパス）を返す。',
   { vaultPath: z.string().describe('Obsidian vaultの絶対パス') },
   async ({ vaultPath }) => {
+    const guard = await guardVaultPath(vaultPath);
+    if (guard.error) return guard.error;
     const resolved = path.resolve(vaultPath);
     const job = getJob(resolved);
     let stateSummary: Record<string, number> = {};
@@ -185,6 +210,8 @@ server.tool(
   'レポート（.o2n/report.md）の内容を返す。',
   { vaultPath: z.string().describe('Obsidian vaultの絶対パス') },
   async ({ vaultPath }) => {
+    const guard = await guardVaultPath(vaultPath);
+    if (guard.error) return guard.error;
     try {
       const content = await fs.readFile(reportPath(vaultPath), 'utf-8');
       return text(content);
