@@ -48,6 +48,10 @@ npx @tk_wfl/o2n-cli login
 
 ### コマンド一覧
 
+移行先にする親ページは、事前にNotion側で使用中のintegration（internal integrationまたは`o2n login`で
+連携したintegration）に**接続（Connect）**しておく必要がある。未接続のページを指定すると、
+`plan`/`migrate`実行時に`404 Could not find page`エラーになる。
+
 ```bash
 # 1. vaultを走査（読み取りのみ）
 npx @tk_wfl/o2n-cli scan <vaultPath>

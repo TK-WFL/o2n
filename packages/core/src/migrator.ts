@@ -395,8 +395,15 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       continue;
     }
 
+    const attachedPlaceholders = new Set(noteState.attachedPlaceholders ?? []);
+
     for (const file of reconverted.pendingFiles) {
       if (!file.targetPath) continue; // 未解決添付はPass1で警告済み
+
+      // この箇所（プレースホルダー）は前回の実行で既に貼り付け・削除済み。
+      // resumeでPass3が'done'ノートを再訪しても、置換済みプレースホルダーは
+      // もう本文に存在しないため誤って「見つからない」警告を出さないようにする。
+      if (attachedPlaceholders.has(file.placeholder)) continue;
 
       const existingFile = state.getFile(file.targetPath);
       // 'skipped'（サイズ超過）はファイル単位で確定した結果なので毎回スキップする。
@@ -439,6 +446,15 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
         // ブロックタイプを限定せず、プレースホルダー文字列を含むブロックを探す。
         const placeholderBlock = children.results.find((b) => JSON.stringify(b).includes(file.placeholder));
         if (!placeholderBlock) {
+          // この修正より前に作られたstate.json（attachedPlaceholders未記録）は、
+          // 過去の実行で正常に貼り付け済みでも記録が残っていない。ファイル自体が
+          // 既に'attached'なら「見つからない」のは過去の正常完了である可能性が高いため、
+          // 誤警告にせず記録だけ補完する（自己修復）。
+          if (existingFile?.status === 'attached') {
+            attachedPlaceholders.add(file.placeholder);
+            await state.setNote(note.path, { ...state.getNote(note.path)!, attachedPlaceholders: [...attachedPlaceholders] });
+            continue;
+          }
           report.push({ category: 'warning', path: note.path, message: `添付プレースホルダーが見つかりませんでした: ${file.placeholder}` });
           continue;
         }
@@ -446,6 +462,8 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
         await api.appendBlockChildren(noteState.pageId, [buildAttachmentBlock(fileUploadId!, ext)], placeholderBlock.id);
         await api.deleteBlock(placeholderBlock.id);
         await state.setFile(file.targetPath, { status: 'attached', fileUploadId });
+        attachedPlaceholders.add(file.placeholder);
+        await state.setNote(note.path, { ...state.getNote(note.path)!, attachedPlaceholders: [...attachedPlaceholders] });
       } catch (err) {
         report.push({ category: 'warning', path: note.path, message: `添付ブロック挿入に失敗: ${String(err)}` });
       }

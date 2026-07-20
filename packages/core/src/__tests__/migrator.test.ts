@@ -89,6 +89,11 @@ function createMockServer() {
     }
 
     if (method === 'DELETE' && /\/blocks\//.test(p)) {
+      const blockId = p.split('/')[2] ?? '';
+      for (const blocks of pageBlocks.values()) {
+        const idx = blocks.findIndex((b) => b.id === blockId);
+        if (idx !== -1) blocks.splice(idx, 1);
+      }
       return new Response(null, { status: 204 });
     }
 
@@ -332,6 +337,52 @@ describe('migrator 3パス統合テスト（モック）', () => {
 
     expect(state2.getFile('Sub/pic.png')?.status).toBe('attached');
     expect(calls.some((c) => c.method === 'POST' && /\/file_uploads\/.+\/send$/.test(c.path))).toBe(true);
+  });
+
+  it('完了済みノートをresumeしても、貼り付け済み添付プレースホルダーを誤って警告しない（回帰テスト）', async () => {
+    const { fetchImpl } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+
+    // 1回目: 添付アップロード・貼り付けが正常に成功する
+    const state1 = await StateStore.load(tmpDir, 'root-page');
+    const report1 = await runMigration({ vaultPath: tmpDir, plan, inventory, api, state: state1, dryRun: false });
+    expect(state1.getFile('Sub/pic.png')?.status).toBe('attached');
+    expect(report1.some((e) => e.category === 'warning' && e.message.includes('添付プレースホルダーが見つかりませんでした'))).toBe(false);
+
+    // 2回目: resume。ノートは既にdoneで、プレースホルダーは1回目で削除済み。
+    // Pass3は失敗した添付の再試行のために'done'ノートも再訪するが、
+    // 既に貼り付け済みの箇所については誤警告を出してはならない。
+    const inventory2 = await scanVault(tmpDir);
+    const state2 = await StateStore.load(tmpDir, 'root-page');
+    const report2 = await runMigration({ vaultPath: tmpDir, plan, inventory: inventory2, api, state: state2, dryRun: false });
+
+    expect(report2.some((e) => e.category === 'warning' && e.message.includes('添付プレースホルダーが見つかりませんでした'))).toBe(false);
+    expect(state2.getFile('Sub/pic.png')?.status).toBe('attached');
+  });
+
+  it('attachedPlaceholders未記録の旧state（本修正より前のバージョン）をresumeしても誤警告せず自己修復する（回帰テスト）', async () => {
+    const { fetchImpl } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+
+    const state1 = await StateStore.load(tmpDir, 'root-page');
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state: state1, dryRun: false });
+
+    // 本修正より前のstate.jsonを模倣: attachedPlaceholdersを持たない状態に書き換える
+    const noteState = state1.getNote('Sub/Sub Note.md')!;
+    await state1.setNote('Sub/Sub Note.md', { ...noteState, attachedPlaceholders: undefined });
+
+    const inventory2 = await scanVault(tmpDir);
+    const state2 = await StateStore.load(tmpDir, 'root-page');
+    const report2 = await runMigration({ vaultPath: tmpDir, plan, inventory: inventory2, api, state: state2, dryRun: false });
+
+    expect(report2.some((e) => e.category === 'warning' && e.message.includes('添付プレースホルダーが見つかりませんでした'))).toBe(false);
+    expect(state2.getFile('Sub/pic.png')?.status).toBe('attached');
   });
 
   it('resumeは既完了ノートを二重作成しない', async () => {

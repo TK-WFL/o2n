@@ -27,6 +27,7 @@ const noteStateSchema = z.object({
   pageUrl: z.string().optional(),
   contentHash: z.string().optional(),
   error: z.string().optional(),
+  attachedPlaceholders: z.array(z.string()).optional(),
 });
 
 const fileStateSchema = z.object({

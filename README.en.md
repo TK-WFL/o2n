@@ -48,6 +48,10 @@ flow. If you used `o2n login` with an older version, revoke and re-issue the Not
 
 ### Commands
 
+Before running `plan`/`migrate`, the destination parent page must already be **connected** to the
+integration you're using (an internal integration, or the one linked via `o2n login`) in Notion.
+An unconnected page causes a `404 Could not find page` error at `plan`/`migrate` time.
+
 ```bash
 # 1. Scan the vault (read-only)
 npx @tk_wfl/o2n-cli scan <vaultPath>

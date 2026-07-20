@@ -109,6 +109,14 @@ export interface NoteState {
   pageUrl?: string;
   contentHash?: string;
   error?: string;
+  /**
+   * 貼り付け済みの添付プレースホルダー一覧。同じ添付を複数箇所で参照する場合、
+   * 箇所ごとに個別のプレースホルダー文字列を持つ。resume時に「既にこの箇所は
+   * 貼り付け済み」と判定するために使う（実ワークスペースで発覚した不具合:
+   * 'done'ノートをresumeすると、既に置換・削除済みのプレースホルダーを
+   * Pass3が再度探しに行き、見つからないことを誤って警告していた）。
+   */
+  attachedPlaceholders?: string[];
 }
 
 export type FileStatus = 'pending' | 'uploaded' | 'attached' | 'failed' | 'skipped';
