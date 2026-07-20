@@ -1,6 +1,6 @@
 {
   "name": "@tk_wfl/o2n-core",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Obsidian vaultをNotionへ移行するo2nのコアロジック（scanner/converter/migrator/state）",
   "type": "module",
   "license": "MIT",
