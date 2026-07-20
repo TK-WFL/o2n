@@ -117,35 +117,20 @@ async function openOrCreateDirectoryTree(
   directoryPath: string,
   noFollowFlag = NOFOLLOW,
 ): Promise<OpenDirectory> {
-  const missingSegments: string[] = [];
-  let existingAncestor = path.resolve(directoryPath);
-
-  while (true) {
-    try {
-      const stat = await fs.lstat(existingAncestor);
-      if (stat.isSymbolicLink()) {
-        throw securityError(existingAncestor, 'シンボリックリンクは使用できません');
-      }
-      if (!stat.isDirectory()) {
-        throw securityError(existingAncestor, '通常のディレクトリではありません');
-      }
-      break;
-    } catch (error) {
-      if (!isEnoent(error)) throw error;
-      const parent = path.dirname(existingAncestor);
-      if (parent === existingAncestor) throw error;
-      missingSegments.push(path.basename(existingAncestor));
-      existingAncestor = parent;
-    }
+  const resolvedDirectory = path.resolve(directoryPath);
+  const filesystemRoot = path.parse(resolvedDirectory).root;
+  const relativePath = path.relative(filesystemRoot, resolvedDirectory);
+  if (path.isAbsolute(relativePath) || relativePath.startsWith(`..${path.sep}`)) {
+    throw securityError(directoryPath, 'filesystem root外のパスは使用できません');
   }
+  const segments = relativePath.split(path.sep).filter(Boolean);
 
-  const canonicalAncestor = await fs.realpath(existingAncestor);
-  let directory = await openDirectory(canonicalAncestor, {
+  let directory = await openDirectory(filesystemRoot, {
     create: false,
     noFollowFlag,
   });
   try {
-    for (const segment of missingSegments.reverse()) {
+    for (const segment of segments) {
       await assertDirectoryUnchanged(directory);
       const childPath = path.join(directory.canonicalPath, segment);
       try {

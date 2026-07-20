@@ -13,7 +13,8 @@ let testRoot: string;
 let vaultPath: string;
 
 beforeEach(async () => {
-  testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-local-state-'));
+  const createdRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-local-state-'));
+  testRoot = await fs.realpath(createdRoot);
   vaultPath = path.join(testRoot, 'vault');
   await fs.mkdir(vaultPath);
 });
@@ -126,5 +127,32 @@ describe('vault local state I/O', () => {
     await expect(
       fs.lstat(path.join(outsideDirectory, 'nested', 'plan.json')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('symlink祖先の配下に既存directoryがあっても拒否する', async () => {
+    const outsideDirectory = path.join(testRoot, 'outside-with-existing');
+    const linkedAncestor = path.join(testRoot, 'linked-with-existing');
+    await fs.mkdir(path.join(outsideDirectory, 'existing'), { recursive: true });
+    await fs.symlink(outsideDirectory, linkedAncestor);
+
+    await expect(
+      atomicWriteRegularFileNoFollow(
+        path.join(linkedAncestor, 'existing', 'new', 'plan.json'),
+        '{"version":1}',
+      ),
+    ).rejects.toThrow();
+    await expect(
+      fs.lstat(path.join(outsideDirectory, 'existing', 'new', 'plan.json')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('複数の既存segmentを検証してからdeep nestedを作成する', async () => {
+    const existingParent = path.join(testRoot, 'existing', 'segments');
+    const outputPath = path.join(existingParent, 'new', 'deep', 'plan.json');
+    await fs.mkdir(existingParent, { recursive: true });
+
+    await atomicWriteRegularFileNoFollow(outputPath, '{"version":1}');
+
+    expect(await fs.readFile(outputPath, 'utf-8')).toBe('{"version":1}');
   });
 });
