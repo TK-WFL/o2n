@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@tk_wfl/o2n-core": "^0.2.4",
-    "@modelcontextprotocol/sdk": "^1.9.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
