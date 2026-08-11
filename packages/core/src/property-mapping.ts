@@ -14,7 +14,8 @@ export function inferPropertyType(key: string, sampleValues: unknown[]): Frontma
   const nonNull = sampleValues.filter((v) => v !== undefined && v !== null);
   if (nonNull.length === 0) return 'rich_text';
 
-  // gray-matter(js-yaml)は無引用の YYYY-MM-DD 等をJSのDate型にパースするため先に判定する
+  // gray-matter@2.x(js-yaml 4)は無引用の YYYY-MM-DD 等をJSのDate型にパースしていた名残。
+  // gray-matter@3.x(js-yaml 5)は文字列のまま返すため、実際は下のDATE_RE分岐で判定される
   const allDateInstance = nonNull.every((v) => v instanceof Date);
   if (allDateInstance) return 'date';
 

@@ -13,8 +13,10 @@ export function buildFrontmatterMetaCallout(frontmatter: Record<string, unknown>
   if (keys.length === 0) return '';
   const lines = keys.map((k) => {
     const v = frontmatter[k];
-    // gray-matter(js-yaml)は無引用のYYYY-MM-DD等をDate型にパースするため、
-    // JSON.stringifyされた不格好な引用符付きISO文字列にならないよう先に判定する
+    // gray-matter@2.x(js-yaml 4)は無引用のYYYY-MM-DD等をDate型にパースしていたため、
+    // JSON.stringifyされた不格好な引用符付きISO文字列にならないよう先に判定していた名残。
+    // gray-matter@3.x(js-yaml 5)は同じ値を文字列のまま返すため実質到達しないが、
+    // 将来Date型を返す実装に戻っても壊れないよう残す。
     const rendered =
       v instanceof Date
         ? v.toISOString().slice(0, 10)

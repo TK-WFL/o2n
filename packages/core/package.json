@@ -37,8 +37,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@11ty/gray-matter": "^2.1.0",
-    "@notionhq/client": "^5.23.2",
+    "@11ty/gray-matter": "^3.0.0",
+    "@notionhq/client": "^5.23.3",
     "p-queue": "^9.3.3",
     "zod": "^4.4.3"
   },
