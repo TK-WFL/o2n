@@ -91,7 +91,11 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
   let i = 0;
   while (i < lines.length) {
     const line = lines[i] ?? '';
-    const calloutMatch = /^>\s?\[!(\w+)\]([-+]?)\s*(.*)$/.exec(line);
+    // `\s` ではなく `[ \t]` を使うのは、`\s` が改行を含むことで `(.*)$` との間に
+    // 曖昧さ（＝バックトラックの余地）が生まれるのを避けるため。実測ではV8の最適化により
+    // 遅延は再現しなかったが、CodeQL js/polynomial-redos の指摘に対して防御的に限定している。
+    // 呼び出し元が split('\n') 済みの1行を渡す以上、ここで許容すべき空白は半角スペースとタブのみ。
+    const calloutMatch = /^>[ \t]?\[!(\w+)\]([-+]?)[ \t]*(.*)$/.exec(line);
     if (calloutMatch) {
       const [, rawType, , titleText] = calloutMatch;
       const type = (rawType ?? '').toLowerCase();
