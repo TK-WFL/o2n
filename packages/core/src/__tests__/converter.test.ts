@@ -159,3 +159,36 @@ describe('convertNote §6 変換表', () => {
     expect(result.needsEscapeRestore).toBe(false);
   });
 });
+
+describe('wikilink解析のReDoS耐性（セキュリティ回帰テスト）', () => {
+  it(']]で閉じない[の大量反復を与えても短時間で処理を終える', () => {
+    // CodeQL js/polynomial-redos 指摘の再現入力。文字クラスから `[` を除外する前は
+    // 50,000反復で約10秒かかっていた（二次オーダーのバックトラック）。
+    const evil = '[[' + '[["'.repeat(50_000);
+    const started = Date.now();
+    convertNote(evil, ctx());
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('|の大量反復を与えても短時間で処理を終える', () => {
+    const evil = '[[' + 'a|'.repeat(50_000);
+    const started = Date.now();
+    convertNote(evil, ctx());
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('md形式リンク・画像・脚注の記法でも[の大量反復で遅延しない', () => {
+    // CodeQLは未検出だったが、実測でWIKILINK_REと同種のReDoSがあった3箇所の回帰テスト。
+    // MD_LINK_RE / MD_IMAGE_RE / 脚注参照は、いずれも修正前は2〜3秒かかっていた。
+    const inputs = [
+      '[' + '[a'.repeat(50_000),
+      '![' + '![a'.repeat(50_000),
+      '[^' + '[^a'.repeat(50_000),
+    ];
+    for (const evil of inputs) {
+      const started = Date.now();
+      convertNote(evil, ctx());
+      expect(Date.now() - started).toBeLessThan(1_000);
+    }
+  });
+});

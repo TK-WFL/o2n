@@ -156,7 +156,8 @@ function expandFootnotes(text: string, entries: ReportEntry[], sourcePath: strin
     return '';
   });
   if (defs.size === 0) return withoutDefs;
-  const result = withoutDefs.replace(/\[\^([^\]]+)\]/g, (m, id) => {
+  // ReDoS対策（WIKILINK_RE と同じ理由で `[` を除外。脚注IDに `[` は現れない）
+  const result = withoutDefs.replace(/\[\^([^[\]]+)\]/g, (m, id) => {
     const body = defs.get(id);
     if (body === undefined) return m;
     entries.push({
@@ -179,7 +180,13 @@ function makeFilePlaceholder(): string {
   return `⟦o2n-file-${fileCounter++}⟧`;
 }
 
-const WIKILINK_RE = /(!?)\[\[([^\]|#]+)(?:#(\^?[^\]|]+))?(?:\|([^\]]+))?\]\]/g;
+// セキュリティ対策（CodeQL js/polynomial-redos 指摘対応）: 各文字クラスから `[` を除外している。
+// 除外前は `[[` の直後に `]]` で閉じない `[` の並び（例: `[["` の大量反復）を与えると、
+// 先頭グループが貪欲に食べては1文字ずつ戻る二次オーダーのバックトラックが起き、
+// 50,000文字程度で約10秒かかっていた（除外後は同入力で0ms）。
+// Obsidianはファイル名に `[` `]` を使えないため、正当なwikilinkの解釈は変わらない。
+// alias側から `|` を除外しているのも同じ理由（aliasに `|` は現れない）。
+const WIKILINK_RE = /(!?)\[\[([^[\]|#]+)(?:#(\^?[^[\]|]+))?(?:\|([^[\]|]+))?\]\]/g;
 
 const ATTACHMENT_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp',
@@ -261,8 +268,11 @@ function convertWikiLinks(
   });
 }
 
-const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
-const MD_LINK_RE = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+// ReDoS対策（WIKILINK_RE と同じ理由で `[` を除外）: 除外前は `[a` の大量反復を与えると
+// 角括弧テキスト部が貪欲に食べては戻る二次オーダーのバックトラックが起き、
+// 50,000反復で2〜3秒かかっていた。Markdownの入れ子リンクは元々不正な記法のため解釈は変わらない。
+const MD_IMAGE_RE = /!\[([^[\]]*)\]\(([^)\s]+)\)/g;
+const MD_LINK_RE = /\[([^[\]]+)\]\(([^)\s]+)\)/g;
 
 function convertMarkdownLinksAndImages(
   text: string,
