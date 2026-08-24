@@ -91,11 +91,11 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
   let i = 0;
   while (i < lines.length) {
     const line = lines[i] ?? '';
-    // `\s` ではなく `[ \t]` を使うのは、`\s` が改行を含むことで `(.*)$` との間に
-    // 曖昧さ（＝バックトラックの余地）が生まれるのを避けるため。実測ではV8の最適化により
-    // 遅延は再現しなかったが、CodeQL js/polynomial-redos の指摘に対して防御的に限定している。
-    // 呼び出し元が split('\n') 済みの1行を渡す以上、ここで許容すべき空白は半角スペースとタブのみ。
-    const calloutMatch = /^>[ \t]?\[!(\w+)\]([-+]?)[ \t]*(.*)$/.exec(line);
+    // ReDoS対策（CodeQL js/polynomial-redos）: 種別の後ろに空白量指定（`\s*`や`[ \t]*`）を
+    // 置くと、直後の `(.*)` と文字集合が重なりバックトラックの余地が残る。
+    // タイトルは後段で trim するため正規表現側で空白を消費する必要はなく、
+    // 量指定子ごと削除して曖昧さを構造的に排除している。
+    const calloutMatch = /^>[ \t]?\[!(\w+)\]([-+]?)(.*)$/.exec(line);
     if (calloutMatch) {
       const [, rawType, , titleText] = calloutMatch;
       const type = (rawType ?? '').toLowerCase();
