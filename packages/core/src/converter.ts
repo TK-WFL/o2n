@@ -153,7 +153,9 @@ function stripComments(text: string, entries: ReportEntry[], sourcePath: string)
 }
 
 function expandFootnotes(text: string, entries: ReportEntry[], sourcePath: string): string {
-  const defRe = /^\[\^([^\]]+)\]:\s*(.+)$/gm;
+  // ReDoS対策: `gm` により行ごとにマッチを試みるため、1行あたりのバックトラックが小さくても
+  // 行数分積み上がる（`[` を除外する前は、`[^` で始まる行を2万行与えると約9.5秒かかった）。
+  const defRe = /^\[\^([^[\]]+)\]:[ \t]*(.+)$/gm;
   const defs = new Map<string, string>();
   const withoutDefs = text.replace(defRe, (_m, id, body) => {
     defs.set(id, body.trim());

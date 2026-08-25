@@ -141,3 +141,23 @@ describe('scanVault frontmatterガード（セキュリティ）', () => {
     }
   });
 });
+
+describe('wikilink抽出のReDoS耐性（セキュリティ回帰テスト）', () => {
+  it(']]で閉じない[の大量反復を含むノートでも短時間でscanを終える', async () => {
+    // scanner.ts の WIKILINK_RE は converter.ts と同じ正規表現の複製で、
+    // converter側だけを修正した際にこちらが取り残され、scanが1ノートで20秒以上
+    // かかっていた（CodeQLはこの複製を検出していなかった）。
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-redos-scan-'));
+    await fs.mkdir(path.join(dir, '.obsidian'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'attack.md'), '[[' + '[["'.repeat(50_000));
+    try {
+      const started = Date.now();
+      await scanVault(dir);
+      expect(Date.now() - started).toBeLessThan(3_000);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});

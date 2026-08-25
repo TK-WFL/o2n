@@ -72,7 +72,11 @@ async function walk(dir: string, root: string, out: string[]): Promise<void> {
   }
 }
 
-const WIKILINK_RE = /(!?)\[\[([^\]|#]+)(?:#(\^?[^\]|]+))?(?:\|([^\]]+))?\]\]/g;
+// ReDoS対策: converter.ts の同名定数と同じ理由で各文字クラスから `[` を除外している
+// （除外前は `]]` で閉じない `[` の大量反復で二次オーダーのバックトラックが起き、
+// scanコマンドが1ノートあたり20秒以上かかっていた）。
+// Obsidianはファイル名に `[` `]` を使えないため、正当なwikilinkの解釈は変わらない。
+const WIKILINK_RE = /(!?)\[\[([^[\]|#]+)(?:#(\^?[^[\]|]+))?(?:\|([^[\]|]+))?\]\]/g;
 
 interface ParsedWikiLink {
   isEmbed: boolean;
