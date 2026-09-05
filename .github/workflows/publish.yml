@@ -104,14 +104,20 @@ jobs:
           EXPECTED_ARTIFACT_DIGEST: ${{ needs.verify.outputs.artifact-digest }}
       - name: Publish core with provenance
         run: npm publish "$RUNNER_TEMP/npm-release/o2n-core.tgz" --access public --provenance --ignore-scripts
+      # coreの公開自体は成功しても、npmレジストリ側の反映には数分かかることがある。
+      # 待機が短いとここで失敗し、cli/mcp-serverだけ未公開の部分公開状態になり、
+      # verify-release.mjsのassertNotPublishedにより同一バージョンでの再実行もできなくなる
+      # （v0.2.12で実際に発生）。最大5分まで待つ。
       - name: Confirm core is available from npm
         run: |
-          for attempt in 1 2 3 4 5 6; do
-            if [ "$(npm view "@tk_wfl/o2n-core@$RELEASE_VERSION" version)" = "$RELEASE_VERSION" ]; then
+          for attempt in $(seq 1 20); do
+            if [ "$(npm view "@tk_wfl/o2n-core@$RELEASE_VERSION" version 2>/dev/null)" = "$RELEASE_VERSION" ]; then
+              echo "core@$RELEASE_VERSION is visible on npm (attempt $attempt)"
               exit 0
             fi
-            sleep 10
+            sleep 15
           done
+          echo "core@$RELEASE_VERSION did not become visible on npm within 5 minutes" >&2
           exit 1
         env:
           RELEASE_VERSION: ${{ inputs.version }}
