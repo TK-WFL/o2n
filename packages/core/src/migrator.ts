@@ -193,8 +193,20 @@ async function runPass1(
     let parent: { page_id: string } | { type: 'data_source_id'; data_source_id: string };
 
     if (container.kind === 'database' && container.dataSourceId) {
-      markdown = converted.markdown;
-      properties = buildRowProperties(note.frontmatter, plan.frontmatterMappings[folder] ?? [], title);
+      const row = buildRowProperties(note.frontmatter, plan.frontmatterMappings[folder] ?? [], title);
+      properties = row.properties;
+      // 上限で切り詰め・省略した値は、page_treeモードと同じメタcalloutで本文冒頭に全文を退避する
+      // （該当キーのみ。正常に入ったプロパティまで重複させない）
+      if (row.issues.length > 0) {
+        const retained: Record<string, unknown> = {};
+        for (const issue of row.issues) {
+          retained[issue.key] = note.frontmatter[issue.key];
+          report.push({ category: 'downgraded', path: note.path, message: `プロパティ "${issue.key}": ${issue.message}` });
+        }
+        markdown = buildFrontmatterMetaCallout(retained) + converted.markdown;
+      } else {
+        markdown = converted.markdown;
+      }
       parent = { type: 'data_source_id', data_source_id: container.dataSourceId };
     } else {
       markdown = buildFrontmatterMetaCallout(note.frontmatter) + converted.markdown;

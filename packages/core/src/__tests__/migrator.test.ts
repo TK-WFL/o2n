@@ -586,3 +586,46 @@ describe('添付プレースホルダーの探索（#66）', () => {
     for (const n of byPage.values()) expect(n).toBe(1);
   });
 });
+
+describe('databaseモード（#67）', () => {
+  it('フォルダをDB化し、行は data_source_id 親で作成される。2000字超の値は切り詰めて本文冒頭に退避する', async () => {
+    const dbDir = path.join(tmpDir, 'Tasks');
+    await fs.mkdir(dbDir, { recursive: true });
+    const long = 'ん'.repeat(2500);
+    const fm = (status: string, extra = '') => `---\nstatus: ${status}\npriority: 1\ndue: 2026-01-01\n${extra}---\n\n本文\n`;
+    await fs.writeFile(path.join(dbDir, 'A.md'), fm('todo'));
+    await fs.writeFile(path.join(dbDir, 'B.md'), fm('doing'));
+    await fs.writeFile(path.join(dbDir, 'C.md'), fm('done', `memo: "${long}"\n`));
+
+    const { fetchImpl, calls } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    expect(plan.folders.find((f) => f.folderPath === 'Tasks')?.mode).toBe('database');
+    const client = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+    const state = await StateStore.load(tmpDir, 'root-page');
+
+    const report = await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+
+    const dbCreate = calls.find((c) => c.method === 'POST' && c.path === '/databases');
+    expect(dbCreate?.body).toMatchObject({ parent: { type: 'page_id', page_id: 'root-page' } });
+    const schema = (dbCreate?.body as { initial_data_source: { properties: Record<string, unknown> } }).initial_data_source.properties;
+    expect(Object.keys(schema).sort()).toEqual(['Name', 'due', 'memo', 'priority', 'status']);
+
+    const rows = calls.filter((c) => c.method === 'POST' && c.path === '/pages' && (c.body as { parent?: { type?: string } })?.parent?.type === 'data_source_id');
+    expect(rows).toHaveLength(3);
+
+    const rowC = rows.find((c) => String((c.body as { markdown?: string })?.markdown).includes(long));
+    expect(rowC).toBeDefined();
+    const props = (rowC!.body as { properties: Record<string, { rich_text?: Array<{ text: { content: string } }> }> }).properties;
+    expect(props.memo!.rich_text![0]!.text.content.length).toBe(2000);
+    // 退避 callout には切り詰めたキーだけが入り、正常なキーは重複しない
+    const md = (rowC!.body as { markdown: string }).markdown;
+    expect(md.startsWith('<callout')).toBe(true);
+    expect(md).toContain(`memo: ${long}`);
+    expect(md).not.toContain('status:');
+    expect(report.some((e) => e.category === 'downgraded' && e.path === 'Tasks/C.md' && e.message.includes('memo'))).toBe(true);
+
+    for (const p of ['Tasks/A.md', 'Tasks/B.md', 'Tasks/C.md']) expect(state.getNote(p)?.status).toBe('done');
+  });
+});
