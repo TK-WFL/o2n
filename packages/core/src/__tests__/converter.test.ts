@@ -144,6 +144,31 @@ describe('convertNote §6 変換表', () => {
     expect(result.markdown).toBe('<span color="yellow_bg">重要</span>');
   });
 
+  it.each([
+    ['🔴', 'red_bg'],
+    ['🟠', 'orange_bg'],
+    ['🟡', 'yellow_bg'],
+    ['🟢', 'green_bg'],
+    ['🔵', 'blue_bg'],
+    ['🟣', 'purple_bg'],
+  ])('Obsidian 1.14 の色付きハイライト ==%s text== は %s になり絵文字は除かれる', (emoji, color) => {
+    expect(convertNote(`==${emoji}重要==`, ctx()).markdown).toBe(`<span color="${color}">重要</span>`);
+    // 絵文字と本文の間の空白1つも除く
+    expect(convertNote(`==${emoji} 重要==`, ctx()).markdown).toBe(`<span color="${color}">重要</span>`);
+  });
+
+  it('先頭以外の色絵文字はそのまま本文に残る', () => {
+    expect(convertNote('==重要🔴==', ctx()).markdown).toBe('<span color="yellow_bg">重要🔴</span>');
+  });
+
+  it('色絵文字だけのハイライトは変換せず元のまま残す', () => {
+    expect(convertNote('==🔴==', ctx()).markdown).toBe('==🔴==');
+  });
+
+  it('1行に複数の色付きハイライトがあっても個別に変換される', () => {
+    expect(convertNote('==🟢A== と ==🔵B==', ctx()).markdown).toBe('<span color="green_bg">A</span> と <span color="blue_bg">B</span>');
+  });
+
   it('%%コメント%% は削除されレポートされる', () => {
     const result = convertNote('前%%消える%%後', ctx());
     expect(result.markdown).toBe('前後');
