@@ -198,3 +198,27 @@ gray-matter(js-yaml)は無引用のYYYY-MM-DD等をDate型としてパースす�
 コードブロック本文はそのまま保持されるが、\`\`\`dataview という言語識別子はNotion側が
 認識せず、読み込み後は別の言語（環境によって変わりうる）にフォールバックされることが
 実ワークスペースで確認された。内容の欠落は無いため対応は見送っている。
+
+## 19. `<details>` トグルは複数行形式でのみ認識され、内側の `<callout>` も保持される（実ワークスペースで検証済み、2026-09-20）
+
+**該当**: `packages/core/src/converter.ts` `convertCallouts`（折りたたみ callout `[!type]-` → トグル、#75）
+
+`POST /v1/pages` の `markdown` で `<details>` を1行に書くと（`<details><summary>T</summary>本文</details>`）
+認識されず、エスケープされたプレーンテキストの段落になる。次のように `<details>` / `<summary>` /
+本文 / `</details>` を別々の行にすると `toggle` ブロックになり、本文の `<callout>` はトグルの
+子ブロック（callout）として保持される。summary と本文の間の空行は無くてもよい。
+
+```
+<details>
+<summary>**タイトル**</summary>
+<callout icon="💡" color="blue_bg">本文</callout>
+</details>
+```
+
+このため Obsidian の折りたたみ callout（`> [!note]- タイトル`）は上記形式に変換している。
+`[!note]+`（既定で開く）は Notion の callout が常に展開表示のため通常の callout のまま。
+
+同じ検証で確認した他の挙動:
+- `#####` / `######`（h5/h6）は Notion 側で自動的に `heading_4` になる（本文の欠落なし）。#73 参照
+- `- [/]` `- [-]` などタスクの拡張状態は `to_do` にならず、`[/] text` という文字列を含む
+  `bulleted_list_item` になる。#79 参照

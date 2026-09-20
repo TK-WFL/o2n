@@ -71,6 +71,27 @@ describe('convertNote §6 変換表', () => {
     expect(convertNote('> [!danger] T\n> b', ctx()).markdown).toContain('icon="⛔" color="red_bg"');
   });
 
+  it('折りたたみ callout（[!type]-）は Notion のトグル（複数行 <details>）に変換され、本文は callout として保持される', () => {
+    const result = convertNote('> [!note]- 折りたたみ\n> 本文1\n> 本文2', ctx());
+    expect(result.markdown).toBe(
+      '<details>\n<summary>**折りたたみ**</summary>\n<callout icon="💡" color="blue_bg">本文1<br>本文2</callout>\n</details>',
+    );
+    expect(result.entries.some((e) => e.category === 'downgraded')).toBe(false);
+  });
+
+  it('折りたたみ callout の本文が無い場合は summary のみのトグルになる', () => {
+    expect(convertNote('> [!note]- タイトルだけ', ctx()).markdown).toBe('<details>\n<summary>**タイトルだけ**</summary>\n</details>');
+  });
+
+  it('既定で開く callout（[!type]+）は通常の callout のまま', () => {
+    expect(convertNote('> [!note]+ 開いている\n> 本文', ctx()).markdown).toBe('<callout icon="💡" color="blue_bg">**開いている**<br>本文</callout>');
+  });
+
+  it('折りたたみ callout の前後の行は影響を受けない', () => {
+    const result = convertNote('前\n> [!warning]- W\n> b\n後', ctx());
+    expect(result.markdown).toBe('前\n<details>\n<summary>**W**</summary>\n<callout icon="⚠️" color="orange_bg">b</callout>\n</details>\n後');
+  });
+
   it('未知のcallout種別はデフォルト(ℹ️/gray)に変換されレポートされる', () => {
     const result = convertNote('> [!custom] T\n> b', ctx());
     expect(result.markdown).toContain('icon="ℹ️" color="gray_bg"');
