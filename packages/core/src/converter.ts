@@ -178,8 +178,28 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
  * 太字への降格は不要な情報劣化だったため、ネイティブハイライトに変換する（黄色をデフォルトに使用。
  * Obsidianの`==text==`自体は色を指定しないため）。
  */
+/**
+ * Obsidian 1.14.0（2026-09-02）の色付きハイライト: `==🔴text==` のようにハイライト先頭の
+ * 色絵文字で色を指定する。絵文字は表示用の記号なので Notion 側では色だけ反映し、絵文字は除く。
+ * https://obsidian.md/changelog/2026-09-02-desktop-v1.14.0/
+ */
+const HIGHLIGHT_COLOR_EMOJI: Record<string, string> = {
+  '🔴': 'red_bg',
+  '🟠': 'orange_bg',
+  '🟡': 'yellow_bg',
+  '🟢': 'green_bg',
+  '🔵': 'blue_bg',
+  '🟣': 'purple_bg',
+};
+const HIGHLIGHT_COLOR_PREFIX_RE = /^(🔴|🟠|🟡|🟢|🔵|🟣)\s?/u;
+
 function convertHighlights(text: string): string {
-  return text.replace(/==([^=\n]+)==/g, (_m, inner) => `<span color="yellow_bg">${inner}</span>`);
+  return text.replace(/==([^=\n]+)==/g, (_m, inner: string) => {
+    const prefix = HIGHLIGHT_COLOR_PREFIX_RE.exec(inner);
+    const color = prefix ? HIGHLIGHT_COLOR_EMOJI[prefix[1]!]! : 'yellow_bg';
+    const body = prefix ? inner.slice(prefix[0].length) : inner;
+    return body ? `<span color="${color}">${body}</span>` : _m;
+  });
 }
 
 function stripComments(text: string, entries: ReportEntry[], sourcePath: string): string {
