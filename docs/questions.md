@@ -76,7 +76,9 @@ databaseモードのDB ID・data source ID）を永続化する仕組みが無�
 
 テストは `MigratorOptions.multipartPartSizeBytes` でパートサイズを1 KiBに差し替え、2.5 KiBのファイルで
 「3パート送信 → complete」の順序を検証している（`migrator.test.ts`）。実ワークスペースでの20 MiB超
-ファイルの確認は #82（全体動作確認）で行う。
+ファイルは #82 の全体動作確認で実機確認済み: 25 MiB のファイルが `number_of_parts: 2` で送信され、
+`/complete` 後に `GET /file_uploads/:id` が `status: uploaded`（sent 2/2）を返し、video ブロックとして
+ページに貼られた（2026-09-20）。
 
 ---
 
