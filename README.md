@@ -100,6 +100,10 @@ MCPからvaultへアクセスするには、`O2N_ALLOWED_VAULTS=/absolute/path/t
 
 1,000ノート＋500添付 ≒ API呼び出し4,000〜5,000回 ≒ 実効2.5req/sで約30〜40分。
 
+既定のレートは2req/秒（Notionの接続ごとの上限はFree/Plusで180req/分、Business/Enterpriseで600req/分）。
+Business以上のワークスペースでは `O2N_REQUESTS_PER_SECOND=8` のように1〜10の範囲で上げると移行時間を短縮できる
+（429を受けた場合は `Retry-After` に従って自動的に待つ）。
+
 ## Notion Freeプランのブロック上限について
 
 2026年9月から、**複数メンバーのFreeワークスペース**は生涯1,000ブロックの上限がAPIにも適用される

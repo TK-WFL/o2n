@@ -12,8 +12,23 @@ export interface RetryOptions {
 const DEFAULT_RETRY: RetryOptions = {
   maxRetries: 5,
   initialDelayMs: 1000,
+  // 2026-09-09 以降 Notion の Retry-After は最大 60 秒。異常値が来ても上限としてこの値でクランプする
   maxDelayMs: 60_000,
 };
+
+/**
+ * 環境変数 O2N_REQUESTS_PER_SECOND（1〜10 の整数）からレート制御設定を作る。
+ * Notion の接続ごとの上限は Free/Plus 180 req/分（3 req/秒）、Business/Enterprise 600 req/分（10 req/秒）。
+ * 既定の 2 req/秒はどのプランでも安全側。Business 以上では上げて移行時間を短縮できる。
+ * 不正な値は無視して既定にフォールバックする。
+ */
+export function rateLimitFromEnv(env: NodeJS.ProcessEnv = process.env): Partial<RateLimitOptions> | undefined {
+  const raw = env.O2N_REQUESTS_PER_SECOND;
+  if (raw === undefined || raw === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 10) return undefined;
+  return { concurrency: n, interval: 1000, intervalCap: n };
+}
 
 export class NotionApiError extends Error {
   constructor(
@@ -184,11 +199,15 @@ export class NotionClient {
     if (res.status === 429 || res.status >= 500) {
       if (attempt >= this.retry.maxRetries) {
         const body = await safeJson(res);
-        throw new NotionApiError(res.status, (body as { code?: string })?.code, `retry exhausted: ${res.status}`, body);
+        const b = body as { code?: string; additional_data?: { rate_limit_reason?: string } } | undefined;
+        // 429 本文の rate_limit_reason（接続ごと / ワークスペース共有 のどちらの上限か）を残す
+        const reason = b?.additional_data?.rate_limit_reason ? ` (rate_limit_reason: ${b.additional_data.rate_limit_reason})` : '';
+        throw new NotionApiError(res.status, b?.code, `retry exhausted: ${res.status}${reason}`, body);
       }
       const retryAfterHeader = res.headers.get('Retry-After');
-      const delay = retryAfterHeader
-        ? Number(retryAfterHeader) * 1000
+      const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : NaN;
+      const delay = Number.isFinite(retryAfterMs) && retryAfterMs >= 0
+        ? Math.min(this.retry.maxDelayMs, retryAfterMs)
         : Math.min(this.retry.maxDelayMs, this.retry.initialDelayMs * 2 ** attempt) + Math.random() * 250;
       await sleep(delay);
       return this.executeWithRetry<T>(req, attempt + 1);
