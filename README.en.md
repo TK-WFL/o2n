@@ -91,7 +91,7 @@ vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
 - Obsidian callouts → Notion callouts (all 13 official types and their aliases mapped to icon/color; unknown types fall back to gray and are reported)
 - Highlights (`==text==`, including Obsidian 1.14 color highlights such as `==🔴text==`) → native Notion highlight with the matching color
 - Math (`$...$` / `$$...$$`) and mermaid code blocks → passed through as-is
-- Unsupported elements (Canvas, Dataview query results, transclusion, etc.) are recorded in the report
+- Unsupported elements are recorded in the report: Canvas (`.canvas`), Bases (`.base`), Dataview query results, transclusion, etc. Excalidraw drawing notes are migrated as their exported image (`.png`/`.svg` with the same name) when one exists, otherwise skipped
 
 For each folder, if 60%+ of its direct notes share 3 or more common frontmatter keys, database mode
 is suggested automatically (the final call is always made by the user via `plan`).

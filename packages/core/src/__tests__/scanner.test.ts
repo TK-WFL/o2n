@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import { buildAliasIndex, buildNameIndex, resolveNoteLink, scanVault, UnsupportedFrontmatterLanguageError } from '../scanner.js';
@@ -204,5 +204,60 @@ describe('frontmatter aliases によるリンク解決（#77）', () => {
     const r = resolveNoteLink('存在しない', 'Home.md', nameIndex, aliasIndex);
     expect(r.resolved).toBeNull();
     expect(r.warning?.reason).toBe('not_found');
+  });
+});
+
+describe('Bases / Excalidraw の扱い（#78）', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-scan-base-'));
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('.base は skipped に理由付きで記録され、ノートにも添付にも含まれない', async () => {
+    await fs.writeFile(path.join(dir, 'Tasks.base'), 'views:\n  - type: table\n');
+    await fs.writeFile(path.join(dir, 'Note.md'), '# n\n');
+    const inv = await scanVault(dir);
+    expect(inv.skipped).toEqual([{ path: 'Tasks.base', reason: expect.stringContaining('Bases') }]);
+    expect(inv.notes.map((n) => n.path)).toEqual(['Note.md']);
+  });
+
+  it('Excalidraw ノートは同名の .png があればその埋め込みに置き換えられ、excalidraw 印が付く', async () => {
+    await fs.writeFile(
+      path.join(dir, 'Drawing.excalidraw.md'),
+      '---\nexcalidraw-plugin: parsed\ntags: [excalidraw]\n---\n==⚠  Switch to EXCALIDRAW VIEW==\n\n```json\n{"type":"excalidraw"}\n```\n',
+    );
+    await fs.writeFile(path.join(dir, 'Drawing.excalidraw.png'), Buffer.from([0x89, 0x50]));
+    const inv = await scanVault(dir);
+    const note = inv.notes.find((n) => n.path === 'Drawing.excalidraw.md');
+    expect(note?.content).toBe('![[Drawing.excalidraw.png]]\n');
+    expect(note?.excalidraw).toEqual({ exportedImage: 'Drawing.excalidraw.png' });
+    expect(inv.attachments.some((a) => a.sourcePath === 'Drawing.excalidraw.md' && a.targetPath === 'Drawing.excalidraw.png')).toBe(true);
+    expect(inv.skipped).toEqual([]);
+  });
+
+  it('Excalidraw ノートは .svg でも可、png を優先する', async () => {
+    await fs.writeFile(path.join(dir, 'D.excalidraw.md'), '---\nexcalidraw-plugin: raw\n---\n```json\n{}\n```\n');
+    await fs.writeFile(path.join(dir, 'D.excalidraw.svg'), '<svg/>');
+    let inv = await scanVault(dir);
+    expect(inv.notes[0]?.excalidraw?.exportedImage).toBe('D.excalidraw.svg');
+    await fs.writeFile(path.join(dir, 'D.excalidraw.png'), Buffer.from([0x89]));
+    inv = await scanVault(dir);
+    expect(inv.notes[0]?.excalidraw?.exportedImage).toBe('D.excalidraw.png');
+  });
+
+  it('書き出し画像が無い Excalidraw ノートは skipped になりノートに含まれない', async () => {
+    await fs.writeFile(path.join(dir, 'Lonely.excalidraw.md'), '---\nexcalidraw-plugin: parsed\n---\n```json\n{}\n```\n');
+    const inv = await scanVault(dir);
+    expect(inv.notes).toEqual([]);
+    expect(inv.skipped).toEqual([{ path: 'Lonely.excalidraw.md', reason: expect.stringContaining('Excalidraw') }]);
+  });
+
+  it('.canvas の理由文は従来通り', async () => {
+    await fs.writeFile(path.join(dir, 'Map.canvas'), '{}');
+    const inv = await scanVault(dir);
+    expect(inv.skipped[0]?.reason).toContain('.canvas');
   });
 });

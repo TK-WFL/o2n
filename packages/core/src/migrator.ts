@@ -207,6 +207,13 @@ async function runPass1(
     const ctx = buildResolvers(inventory, note.path);
     const converted = convertNote(note.content, ctx);
     report.push(...converted.entries);
+    if (note.excalidraw) {
+      report.push({
+        category: 'downgraded',
+        path: note.path,
+        message: `Excalidraw の図面は編集不可の画像（${note.excalidraw.exportedImage}）として移行しました`,
+      });
+    }
 
     const title = (note.frontmatter.title as string | undefined) || basenameNoExt(note.path);
 
