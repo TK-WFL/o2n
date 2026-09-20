@@ -14,6 +14,14 @@
 - frontmatter全型・2000文字超の値（`FrontmatterAllTypes.md`）
 - DB化提案条件を満たすフォルダ（`DatabaseFolder/`: 3ノート共通で status/priority/due の3キー保持）
 - `.obsidian/` `.trash/` （スキャン除外確認用）
+- `Phase2/`（2026-09 の仕様追随・機能追加の検証用）:
+  - callout 全種別・別名と折りたたみ `[!note]-`（`Callouts2.md`）
+  - Obsidian 1.14 の色付きハイライト（`Highlights.md`）
+  - frontmatter `aliases` によるリンク解決（`Aliased.md` ← `AliasLinker.md`）
+  - h5/h6 の降格（`Headings.md`）、タスク拡張状態（`Tasks.md`）、インラインコード保護（`InlineCode.md`）
+  - ノート埋め込みのインライン展開（`EmbedHost.md` → `EmbedTarget.md`、`plan --embed-mode inline` で確認）
+  - 100 ブロック超＋ネストしたリスト内の添付（`LongNote.md`）
+  - Excalidraw（書き出し画像あり `Drawing.excalidraw.md`、なし `Lonely.excalidraw.md`）、Bases（`Tasks.base`）
 
 **20MiB超ファイル（マルチパート）について**: リポジトリを肥大化させないため、20MiB超のダミーファイルは
 コミットしない。マルチパート経路のテストは `packages/core/src/__tests__/migrator.test.ts` が

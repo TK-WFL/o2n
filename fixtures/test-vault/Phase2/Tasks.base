@@ -1,0 +1,6 @@
+filters:
+  and:
+    - file.hasTag("task")
+views:
+  - type: table
+    name: Table
