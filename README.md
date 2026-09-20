@@ -88,7 +88,7 @@ MCPからvaultへアクセスするには、`O2N_ALLOWED_VAULTS=/absolute/path/t
 - Wikilink（`[[ノート]]`、エイリアス、見出しリンクなど）→ Notionページ間リンク
 - frontmatter → ページ内メタ情報（page_treeモード）またはデータベースのプロパティ（databaseモード）
 - 画像・PDF等の添付ファイル → アップロードして元の位置に表示
-- Obsidianのcallout → Notionのcallout（種別ごとの色・アイコン対応）
+- Obsidianのcallout → Notionのcallout（Obsidian公式の全13種別＋別名を色・アイコンに対応。未知の種別はグレーで保持しレポート）
 - ハイライト（`==text==`）→ Notionのネイティブハイライト
 - 数式（`$...$` / `$$...$$`）、mermaidコードブロック → そのまま保持
 - 対応していない要素（Canvas、Dataviewの実行結果、トランスクルージョン等）はレポートに記録される

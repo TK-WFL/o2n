@@ -88,7 +88,7 @@ vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
 - Wikilinks (`[[note]]`, aliases, heading links, etc.) → Notion page-to-page links
 - Frontmatter → in-page metadata (page-tree mode) or database properties (database mode)
 - Images, PDFs, and other attachments → uploaded and shown in their original position
-- Obsidian callouts → Notion callouts (icon/color per type)
+- Obsidian callouts → Notion callouts (all 13 official types and their aliases mapped to icon/color; unknown types fall back to gray and are reported)
 - Highlights (`==text==`) → native Notion highlight
 - Math (`$...$` / `$$...$$`) and mermaid code blocks → passed through as-is
 - Unsupported elements (Canvas, Dataview query results, transclusion, etc.) are recorded in the report
