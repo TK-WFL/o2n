@@ -292,7 +292,37 @@ export class NotionApi {
     await this.client.request({ method: 'DELETE', path: `/blocks/${blockId}` });
   }
 
-  async getBlockChildren(blockId: string): Promise<{ results: Array<{ id: string; type: string; [k: string]: unknown }> }> {
-    return this.client.request({ method: 'GET', path: `/blocks/${blockId}/children` });
+  async getBlockChildren(
+    blockId: string,
+    startCursor?: string,
+  ): Promise<{ results: NotionBlock[]; has_more?: boolean; next_cursor?: string | null }> {
+    return this.client.request({
+      method: 'GET',
+      path: `/blocks/${blockId}/children`,
+      query: { page_size: '100', start_cursor: startCursor },
+    });
   }
+
+  /**
+   * 子ブロックを全件取得する（1回のGETは最大100件。`has_more`/`next_cursor`で続きを辿る）。
+   * 100ブロック超のノートで後半のプレースホルダーが見つからない不具合（#66）への対応。
+   */
+  async listAllBlockChildren(blockId: string): Promise<NotionBlock[]> {
+    const all: NotionBlock[] = [];
+    let cursor: string | undefined;
+    for (;;) {
+      const page = await this.getBlockChildren(blockId, cursor);
+      all.push(...page.results);
+      if (!page.has_more || !page.next_cursor) break;
+      cursor = page.next_cursor;
+    }
+    return all;
+  }
+}
+
+export interface NotionBlock {
+  id: string;
+  type: string;
+  has_children?: boolean;
+  [k: string]: unknown;
 }
