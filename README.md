@@ -91,6 +91,7 @@ MCPからvaultへアクセスするには、`O2N_ALLOWED_VAULTS=/absolute/path/t
 - Obsidianのcallout → Notionのcallout（Obsidian公式の全13種別＋別名を色・アイコンに対応。未知の種別はグレーで保持しレポート）
 - ハイライト（`==text==`、Obsidian 1.14 の色付きハイライト `==🔴text==` の色指定を含む）→ Notionのネイティブハイライト
 - 数式（`$...$` / `$$...$$`）、mermaidコードブロック → そのまま保持
+- 見出しは h4 まで（Notionの上限）。h5/h6 は h4 に降格しレポートに記録される
 - 対応していない要素はレポートに記録される: Canvas（`.canvas`）、Bases（`.base`）、Dataviewの実行結果、トランスクルージョン等。Excalidrawの図面ノートは同名の書き出し画像（`.png`/`.svg`）があればその画像として移行し、無ければスキップ
 
 フォルダごとに、直下ノートの60%以上が共通のfrontmatterキーを3つ以上持つ場合はデータベース化を自動提案する

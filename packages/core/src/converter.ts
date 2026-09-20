@@ -120,6 +120,28 @@ function splitCodeFences(content: string): Segment[] {
   return segments;
 }
 
+/**
+ * Notion の見出しは h4（`####`、2026-03-30 追加）まで。Obsidian の h5/h6 は Notion の enhanced markdown
+ * パーサが自動的に heading_4 として保存する（実ワークスペースで確認、docs/questions.md §19）ため
+ * 本文の書き換えは不要だが、階層が潰れることを利用者が把握できるよう `####` に正規化した上で
+ * downgraded として1ノート1件だけ報告する（#73）。
+ */
+function normalizeHeadingDepth(text: string, entries: ReportEntry[], sourcePath: string): string {
+  let count = 0;
+  const out = text.replace(/^(#{5,6})(?=[ \t])/gm, () => {
+    count += 1;
+    return '####';
+  });
+  if (count > 0) {
+    entries.push({
+      category: 'downgraded',
+      path: sourcePath,
+      message: `見出しレベル5〜6（#####/######）${count}箇所は Notion の上限である見出し4に降格しました`,
+    });
+  }
+  return out;
+}
+
 function convertCallouts(text: string, entries: ReportEntry[], sourcePath: string): string {
   const lines = text.split('\n');
   const out: string[] = [];
@@ -406,6 +428,7 @@ export function convertNote(content: string, ctx: ConverterContext): ConvertNote
       return seg.content; // mermaid含め、コードブロックは常にそのまま保持
     }
     let t = seg.content;
+    t = normalizeHeadingDepth(t, entries, ctx.sourcePath);
     t = convertCallouts(t, entries, ctx.sourcePath);
     t = convertWikiLinks(t, ctx, entries, pendingLinks, pendingFiles);
     t = convertMarkdownLinksAndImages(t, ctx, entries, pendingLinks, pendingFiles);

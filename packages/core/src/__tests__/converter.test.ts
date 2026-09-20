@@ -128,6 +128,20 @@ describe('convertNote §6 変換表', () => {
     expect(result.markdown).toBe('前\n<details>\n<summary>**W**</summary>\n<callout icon="⚠️" color="orange_bg">b</callout>\n</details>\n後');
   });
 
+  it('h5/h6 は h4 に正規化され、1ノート1件の downgraded として報告される（#73）', () => {
+    const result = convertNote('# h1\n\n#### h4\n\n##### h5\n\n###### h6\n\n#######not heading\n', ctx());
+    expect(result.markdown).toBe('# h1\n\n#### h4\n\n#### h5\n\n#### h6\n\n#######not heading\n');
+    const downgraded = result.entries.filter((e) => e.category === 'downgraded' && e.message.includes('見出しレベル5〜6'));
+    expect(downgraded).toHaveLength(1);
+    expect(downgraded[0]!.message).toContain('2箇所');
+  });
+
+  it('コードブロック内の ##### は見出しとして扱わない', () => {
+    const result = convertNote('```\n##### not heading\n```\n', ctx());
+    expect(result.markdown).toContain('##### not heading');
+    expect(result.entries.some((e) => e.message.includes('見出しレベル5〜6'))).toBe(false);
+  });
+
   it('未知のcallout種別はデフォルト(ℹ️/gray)に変換されレポートされる', () => {
     const result = convertNote('> [!custom] T\n> b', ctx());
     expect(result.markdown).toContain('icon="ℹ️" color="gray_bg"');
