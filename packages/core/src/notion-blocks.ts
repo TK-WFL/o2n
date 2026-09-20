@@ -99,11 +99,3 @@ export function buildAttachmentBlock(fileUploadId: string, extension: string): R
     },
   };
 }
-
-export function buildPlaceholderParagraphBlock(placeholder: string): Record<string, unknown> {
-  return {
-    object: 'block',
-    type: 'paragraph',
-    paragraph: { rich_text: [{ type: 'text', text: { content: placeholder } }] },
-  };
-}

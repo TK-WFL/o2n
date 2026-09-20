@@ -197,6 +197,8 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
 
   const mdPaths = allFiles.filter((p) => p.endsWith('.md'));
   const nameIndex = buildNameIndex(mdPaths);
+  // 添付の名前索引はvault全体で一度だけ作る（以前はリンクごとに再構築していて大規模vaultで O(リンク数×ファイル数) だった）
+  const attachmentIndex = buildNameIndex(allFiles.filter((p) => !p.endsWith('.md')));
 
   const notes: NoteRecord[] = [];
   const wikiLinks: WikiLink[] = [];
@@ -242,7 +244,6 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
       const isAttachment = link.isEmbed && ATTACHMENT_EXTENSIONS.has(linkExt);
 
       if (isAttachment) {
-        const attachmentIndex = buildNameIndex(allFiles.filter((p) => !p.endsWith('.md')));
         const { resolved, warning } = resolveByFilename(link.target, relPath, attachmentIndex);
         if (warning) warnings.push(warning);
         attachments.push({

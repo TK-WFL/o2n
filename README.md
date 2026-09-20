@@ -30,7 +30,7 @@ Node.js 20+ が必要。
 **方法A: internal integrationトークンを直接指定（推奨）**
 
 ```bash
-export NOTION_TOKEN=secret_xxx
+export NOTION_TOKEN=ntn_xxx
 ```
 
 `NOTION_TOKEN`環境変数が設定されていればそちらが優先される。コマンドライン引数では
