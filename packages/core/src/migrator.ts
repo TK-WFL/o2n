@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildAliasIndex, buildNameIndex, resolveByFilename, resolveNoteLink } from './scanner.js';
-import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext } from './converter.js';
+import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext, type EmbedMode } from './converter.js';
 import { NotionApiError, NotionBlockLimitError, type NotionApi, type NotionBlock, type UpdateContentItem } from './notion-client.js';
 import type { StateStore } from './state.js';
 import { contentHash, isNoteUpToDate } from './state.js';
@@ -79,14 +79,21 @@ function indexesFor(inventory: VaultInventory): ResolverIndexes {
   return idx;
 }
 
-function buildResolvers(inventory: VaultInventory, sourcePath: string): ConverterContext {
+function buildResolvers(inventory: VaultInventory, sourcePath: string, embedMode: EmbedMode = 'link'): ConverterContext {
   const { noteIndex, aliasIndex, fileIndex } = indexesFor(inventory);
-  return {
+  const ctx: ConverterContext = {
     sourcePath,
     // ファイル名一致 → frontmatter aliases の順で解決（Obsidian の挙動、#77）
     resolveNoteLink: (target: string) => resolveNoteLink(target, sourcePath, noteIndex, aliasIndex).resolved,
     resolveAttachment: (target: string) => resolveByFilename(target, sourcePath, fileIndex).resolved,
+    embedMode,
   };
+  if (embedMode === 'inline') {
+    // インライン展開（#80）: 埋め込み先の本文と、そのノートを起点にしたリンク解決を converter に渡す
+    ctx.readNote = (notePath: string) => inventory.notes.find((n) => n.path === notePath)?.content ?? null;
+    ctx.contextFor = (notePath: string) => buildResolvers(inventory, notePath, embedMode);
+  }
+  return ctx;
 }
 
 /**
@@ -206,7 +213,7 @@ async function runPass1(
     const folder = folderOf(note.path);
     const container = containers.get(folder) ?? { kind: 'page' as const, id: plan.parentPageId };
 
-    const ctx = buildResolvers(inventory, note.path);
+    const ctx = buildResolvers(inventory, note.path, plan.embedMode);
     const converted = convertNote(note.content, ctx);
     report.push(...converted.entries);
     if (note.excalidraw) {
@@ -293,13 +300,13 @@ async function runPass1(
 }
 
 async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
-  const { inventory, state, api, dryRun } = opts;
+  const { plan, inventory, state, api, dryRun } = opts;
 
   for (const note of inventory.notes) {
     const noteState = state.getNote(note.path);
     if (!noteState || noteState.status !== 'created' || !noteState.pageId) continue;
 
-    const ctx = buildResolvers(inventory, note.path);
+    const ctx = buildResolvers(inventory, note.path, plan.embedMode);
     const reconverted = convertNote(note.content, ctx);
 
     const updates: UpdateContentItem[] = [];
@@ -479,7 +486,7 @@ async function findPlaceholderBlocks(
 }
 
 async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
-  const { inventory, state, api, dryRun, vaultPath } = opts;
+  const { plan, inventory, state, api, dryRun, vaultPath } = opts;
 
   let wsLimit = Infinity;
   if (!dryRun) {
@@ -497,7 +504,7 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
     // （一度'done'になったノートをPass3が二度と見に行かないと、失敗した添付が永遠に直らない）
     if (!noteState || !noteState.pageId || (noteState.status !== 'linked' && noteState.status !== 'done')) continue;
 
-    const ctx = buildResolvers(inventory, note.path);
+    const ctx = buildResolvers(inventory, note.path, plan.embedMode);
     const reconverted = convertNote(note.content, ctx);
 
     if (reconverted.pendingFiles.length === 0) {

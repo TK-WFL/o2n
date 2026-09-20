@@ -98,6 +98,11 @@ export interface MigrationPlan {
   folders: FolderPlan[];
   frontmatterMappings: Record<string, FrontmatterMapping[]>;
   skipList: string[];
+  /**
+   * ノート埋め込み `![[Note]]` の扱い（#80）。省略時は 'link'（リンクに降格）。
+   * 'inline' は埋め込み先の本文をその場に展開する（Notion 上では同期されない複製になる）。
+   */
+  embedMode?: 'link' | 'inline';
 }
 
 export type NoteStatus =

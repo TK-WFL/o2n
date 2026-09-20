@@ -36,11 +36,34 @@ export interface ConvertNoteResult extends ConversionResult {
   needsEscapeRestore: boolean;
 }
 
+export type EmbedMode = 'link' | 'inline';
+
 export interface ConverterContext {
   sourcePath: string;
   /** [[target]] や ![alt](path) 等の解決先ノート/添付相対パスを引く。見つからなければnull */
   resolveNoteLink: (target: string) => string | null;
   resolveAttachment: (target: string) => string | null;
+  /**
+   * ノート埋め込み `![[Note]]` の扱い（#80）。既定 'link' はリンクに降格。'inline' は埋め込み先の
+   * 本文を変換してその場に展開する（Notion にはページ間の同期ブロックを API で作る手段が無いため）。
+   */
+  embedMode?: EmbedMode;
+  /** 'inline' 用: 埋め込み先ノート（vault相対パス）の本文（frontmatter 除く）を返す。無ければ null */
+  readNote?: (notePath: string) => string | null;
+  /** 'inline' 用: 埋め込み先ノートを起点にしたリンク解決コンテキストを返す（パス近接の基準を切り替える） */
+  contextFor?: (notePath: string) => ConverterContext;
+}
+
+/** 埋め込みのインライン展開の最大深さ（A→B→C まで。循環は stack で検出） */
+const MAX_EMBED_DEPTH = 2;
+
+interface ConversionAccumulator {
+  entries: ReportEntry[];
+  pendingLinks: PendingLink[];
+  pendingFiles: PendingFile[];
+  needsEscapeRestore: boolean;
+  /** インライン展開中のノートパス（循環検出用。先頭が最外のノート） */
+  embedStack: string[];
 }
 
 /**
@@ -331,13 +354,84 @@ const ATTACHMENT_EXTENSIONS = new Set([
   'mp4', 'mov', 'webm', 'mkv',
 ]);
 
-function convertWikiLinks(
-  text: string,
+/**
+ * 見出し指定の埋め込み `![[Note#見出し]]` 用: その見出しから、同じか浅いレベルの次の見出しの
+ * 直前までを切り出す。コードブロック内の `#` 行は見出しとして扱わない。見つからなければ null。
+ */
+export function extractSection(content: string, heading: string): string | null {
+  const wanted = heading.trim().toLowerCase();
+  const lines = content.split('\n');
+  let inFence = false;
+  let start = -1;
+  let level = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (/^\s{0,3}(`{3,}|~{3,})/.test(line)) inFence = !inFence;
+    if (inFence) continue;
+    const m = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(line);
+    if (!m) continue;
+    const l = m[1]!.length;
+    if (start === -1) {
+      if (m[2]!.trim().toLowerCase() === wanted) {
+        start = i;
+        level = l;
+      }
+    } else if (l <= level) {
+      return lines.slice(start, i).join('\n');
+    }
+  }
+  return start === -1 ? null : lines.slice(start).join('\n');
+}
+
+/**
+ * `![[Note]]` / `![[Note#見出し]]` を埋め込み先の変換済み本文に置き換える（#80）。
+ * 出力は「📎 caption（元ノートへのリンク）」の callout ＋ 本文 ＋ 区切り線。
+ * 埋め込み先の添付・リンクのプレースホルダーは呼び出し元ノートの acc に積まれるため、
+ * Pass2/3 はそれらを呼び出し元ページ上で解決する。
+ */
+function inlineEmbed(
+  targetPath: string,
+  anchor: string | undefined,
+  displayText: string,
   ctx: ConverterContext,
-  entries: ReportEntry[],
-  pendingLinks: PendingLink[],
-  pendingFiles: PendingFile[],
-): string {
+  acc: ConversionAccumulator,
+): string | null {
+  const { entries } = acc;
+  const label = anchor ? `${displayText}#${anchor}` : displayText;
+  if (!ctx.readNote || !ctx.contextFor) return null;
+  if (acc.embedStack.includes(targetPath)) {
+    entries.push({ category: 'warning', path: ctx.sourcePath, message: `埋め込み "![[${label}]]" は循環しているためリンクに降格しました（${[...acc.embedStack, targetPath].join(' → ')}）` });
+    return null;
+  }
+  if (acc.embedStack.length > MAX_EMBED_DEPTH) {
+    entries.push({ category: 'warning', path: ctx.sourcePath, message: `埋め込み "![[${label}]]" は深さ ${MAX_EMBED_DEPTH} を超えるためリンクに降格しました` });
+    return null;
+  }
+  if (anchor?.startsWith('^')) {
+    entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `ブロック参照の埋め込み "![[${label}]]" はブロック単位で切り出せないためリンクに降格しました` });
+    return null;
+  }
+  const raw = ctx.readNote(targetPath);
+  if (raw === null) return null;
+  const body = anchor ? extractSection(raw, anchor) : raw;
+  if (body === null) {
+    entries.push({ category: 'warning', path: ctx.sourcePath, message: `埋め込み "![[${label}]]" の見出しが見つからないためリンクに降格しました` });
+    return null;
+  }
+
+  const nestedCtx = { ...ctx.contextFor(targetPath), embedMode: 'inline' as const, readNote: ctx.readNote, contextFor: ctx.contextFor };
+  const nestedAcc: ConversionAccumulator = { ...acc, embedStack: [...acc.embedStack, targetPath] };
+  const converted = convertBody(body, nestedCtx, nestedAcc);
+  acc.needsEscapeRestore = acc.needsEscapeRestore || nestedAcc.needsEscapeRestore;
+
+  const captionLink = makeLinkPlaceholder();
+  acc.pendingLinks.push({ placeholder: captionLink, targetPath, fallbackText: label, displayText: label });
+  entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `ノート埋め込み "![[${label}]]" を本文にインライン展開しました（Notion では同期されない複製になります）` });
+  return `<callout icon="📎" color="gray_bg">**埋め込み: ${captionLink}**</callout>\n${converted.trim()}\n\n---\n`;
+}
+
+function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAccumulator): string {
+  const { entries, pendingLinks, pendingFiles } = acc;
   return text.replace(WIKILINK_RE, (raw, bang, targetRaw, anchor, alias) => {
     const isEmbed = bang === '!';
     const target = targetRaw.trim();
@@ -354,12 +448,19 @@ function convertWikiLinks(
     }
 
     if (isEmbed && !ext) {
+      const resolved = ctx.resolveNoteLink(target);
+      const displayText = alias?.trim() || target;
+
+      if (ctx.embedMode === 'inline' && resolved) {
+        const inlined = inlineEmbed(resolved, anchor, displayText, ctx, acc);
+        if (inlined !== null) return inlined;
+        // 展開できない（循環・深さ超過・見出し不明・本文取得不可）場合はリンク降格に落ちる
+      }
+
       // ノート埋め込み（トランスクルージョン非対応→リンク降格）。
       // §16検証済み（実ワークスペース）: <callout>はブロック要素のため、箇条書き行などに
       // インラインで出現すると周辺のcallout構造ごと壊れることが判明。calloutは使わず、
       // 他の降格ケース（見出しリンク等）と同様にプレーンなリンクテキストにする。
-      const resolved = ctx.resolveNoteLink(target);
-      const displayText = alias?.trim() || target;
       entries.push({
         category: 'downgraded',
         path: ctx.sourcePath,
@@ -448,14 +549,28 @@ function convertMarkdownLinksAndImages(
 export function convertNote(content: string, ctx: ConverterContext): ConvertNoteResult {
   linkCounter = 0;
   fileCounter = 0;
-  const entries: ReportEntry[] = [];
-  const pendingLinks: PendingLink[] = [];
-  const pendingFiles: PendingFile[] = [];
+  const acc: ConversionAccumulator = {
+    entries: [],
+    pendingLinks: [],
+    pendingFiles: [],
+    needsEscapeRestore: false,
+    embedStack: [ctx.sourcePath],
+  };
+  const markdown = convertBody(content, ctx, acc);
+  return {
+    markdown,
+    entries: acc.entries,
+    pendingLinks: acc.pendingLinks,
+    pendingFiles: acc.pendingFiles,
+    needsEscapeRestore: acc.needsEscapeRestore,
+  };
+}
 
-  const needsEscapeRestore = content.includes(ESCAPE_TARGET);
-  const escaped = needsEscapeRestore
-    ? content.split(ESCAPE_TARGET).join(ESCAPE_SENTINEL)
-    : content;
+/** convertNote の本体。インライン展開（#80）で埋め込み先ノートにも再帰的に適用される */
+function convertBody(content: string, ctx: ConverterContext, acc: ConversionAccumulator): string {
+  const { entries } = acc;
+  if (content.includes(ESCAPE_TARGET)) acc.needsEscapeRestore = true;
+  const escaped = content.includes(ESCAPE_TARGET) ? content.split(ESCAPE_TARGET).join(ESCAPE_SENTINEL) : content;
 
   const segments = splitCodeFences(escaped);
   const converted = segments.map((seg) => {
@@ -476,19 +591,13 @@ export function convertNote(content: string, ctx: ConverterContext): ConvertNote
     t = normalizeHeadingDepth(t, entries, ctx.sourcePath);
     t = normalizeTaskStates(t, entries, ctx.sourcePath);
     t = convertCallouts(t, entries, ctx.sourcePath);
-    t = convertWikiLinks(t, ctx, entries, pendingLinks, pendingFiles);
-    t = convertMarkdownLinksAndImages(t, ctx, entries, pendingLinks, pendingFiles);
+    t = convertWikiLinks(t, ctx, acc);
+    t = convertMarkdownLinksAndImages(t, ctx, entries, acc.pendingLinks, acc.pendingFiles);
     t = convertHighlights(t);
     t = stripComments(t, entries, ctx.sourcePath);
     t = expandFootnotes(t, entries, ctx.sourcePath);
     return restore(t);
   });
 
-  return {
-    markdown: converted.join(''),
-    entries,
-    pendingLinks,
-    pendingFiles,
-    needsEscapeRestore,
-  };
+  return converted.join('');
 }
