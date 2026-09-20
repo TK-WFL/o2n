@@ -83,6 +83,8 @@ npx @tk_wfl/o2n-cli resume <vaultPath>
 
 # 5. 検証・レポート確認
 npx @tk_wfl/o2n-cli verify <vaultPath>
+# --deep を付けると Notion の実ページも取得し、ページの存在・ゴミ箱・未解決プレースホルダー・添付数を照合する（読み取りのみ）
+npx @tk_wfl/o2n-cli verify <vaultPath> --deep
 npx @tk_wfl/o2n-cli report <vaultPath>
 ```
 
@@ -91,7 +93,7 @@ npx @tk_wfl/o2n-cli report <vaultPath>
 ## 使い方（MCPサーバー）
 
 Claude Desktop / Claude Code から `@tk_wfl/o2n-mcp-server` を stdio MCP サーバーとして登録する。
-ツール: `scan_vault` / `get_plan` / `update_plan` / `prepare_migration` / `commit_migration` / `migration_status` / `get_report`。
+ツール: `scan_vault` / `get_plan` / `update_plan` / `prepare_migration` / `commit_migration` / `migration_status` / `verify_migration` / `get_report`。
 
 MCPからvaultへアクセスするには、`O2N_ALLOWED_VAULTS=/absolute/path/to/vault` のように許可vaultを
 カンマ区切りで明示する。Notionへの本実行は既定で無効で、`O2N_ENABLE_MCP_WRITE=1` と

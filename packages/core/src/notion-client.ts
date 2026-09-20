@@ -271,6 +271,10 @@ export class NotionApi {
     return this.client.request({ method: 'POST', path: '/pages', body: params });
   }
 
+  async getPage(pageId: string): Promise<{ id: string; in_trash?: boolean; url?: string }> {
+    return this.client.request({ method: 'GET', path: `/pages/${pageId}` });
+  }
+
   async getPageMarkdown(pageId: string): Promise<{ markdown: string; unknown_block_ids?: string[] }> {
     return this.client.request({ method: 'GET', path: `/pages/${pageId}/markdown` });
   }
