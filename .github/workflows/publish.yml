@@ -125,3 +125,31 @@ jobs:
         run: |
           npm publish "$RUNNER_TEMP/npm-release/o2n-cli.tgz" --access public --provenance --ignore-scripts
           npm publish "$RUNNER_TEMP/npm-release/o2n-mcp-server.tgz" --access public --provenance --ignore-scripts
+
+  # 公開成功後に GitHub Release をドラフトで作る（タグ v<version>、リリースノートは前回タグ以降の
+  # PR タイトルから自動生成）。ドラフトなので内容を確認して "Publish release" するまで公開されない。
+  # 失敗しても npm 公開自体には影響しない。
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Create draft release
+        run: |
+          tag="v${RELEASE_VERSION}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $tag already exists; skipping"
+            exit 0
+          fi
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --generate-notes \
+            --draft
+          echo "draft release $tag created (target $GITHUB_SHA)"
