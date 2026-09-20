@@ -15,6 +15,7 @@
 - DB化提案条件を満たすフォルダ（`DatabaseFolder/`: 3ノート共通で status/priority/due の3キー保持）
 - `.obsidian/` `.trash/` （スキャン除外確認用）
 
-**20MiB超ファイルについて**: リポジトリを肥大化させないため、20MiB超のダミーファイルはコミットせず、
-`packages/core/src/__tests__/` 内のテストが実行時に一時ディレクトリへ動的生成する
-（`fixtures/test-vault` を汚さない）。
+**20MiB超ファイル（マルチパート）について**: リポジトリを肥大化させないため、20MiB超のダミーファイルは
+コミットしない。マルチパート経路のテストは `packages/core/src/__tests__/migrator.test.ts` が
+`multipartPartSizeBytes` オプションでパートサイズを1 KiBに縮小し、一時ディレクトリに生成した数KiBの
+ファイルで「分割送信 → `/complete`」の流れを検証している（`fixtures/test-vault` を汚さない）。
