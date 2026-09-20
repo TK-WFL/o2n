@@ -11,7 +11,7 @@
 3. 親ページのIDを控える（ページURL末尾の32文字）。
 4. 環境変数を設定する:
    ```bash
-   export NOTION_TOKEN=secret_xxxxxxxx
+   export NOTION_TOKEN=ntn_xxxxxxxx
    ```
 5. `npm install && npm run build` を実行し、ビルド済みCLIを使えるようにする。
 
@@ -67,14 +67,15 @@ node packages/cli/dist/index.js verify fixtures/test-vault
 node packages/cli/dist/index.js report fixtures/test-vault
 ```
 
-### 6. §16未確定事項の検証
+### 6. 未確定事項の検証
 
-`README.md` の「§16 未確定事項」セクションを参照し、各項目を実ワークスペースで確認する。
-確認結果は同セクションと `docs/questions.md` に追記すること。特に:
+実ワークスペースで確認済み・未確認の事項は `docs/questions.md` に集約している（以前 `README.md` に
+あった「§16 未確定事項」セクションは同ファイルへ統合済み）。新たに挙動を確認した場合は
+`docs/questions.md` に追記すること。現時点で実ワークスペース未確認の項目:
 
-- Pass 3を経ずに `markdown` パラメータ内で file_upload id を直接参照できるか
-- マルチパートアップロードの完了フローが実装（`migrator.ts` の `uploadFile`）どおりで良いか
-- `POST /v1/databases` のレスポンス構造（`data_sources[0].id` の有無）
+- マルチパートアップロード（20 MiB 超）の実機確認（`/complete` 呼び出しは #65 で実装済み）
+- 見出し h5/h6 が Notion 側でどう扱われるか（#73）
+- `<details>` 内に `<callout>` を入れられるか（#75）
 
 ### 7. MCPサーバーの動作確認
 
@@ -86,7 +87,7 @@ Claude Desktop の設定ファイルに以下を追加し、再起動する:
     "o2n": {
       "command": "node",
       "args": ["<このリポジトリの絶対パス>/packages/mcp-server/dist/index.js"],
-      "env": { "NOTION_TOKEN": "secret_xxxxxxxx" }
+      "env": { "NOTION_TOKEN": "ntn_xxxxxxxx" }
     }
   }
 }

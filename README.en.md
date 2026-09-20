@@ -30,7 +30,7 @@ Requires Node.js 20+.
 **Option A: internal integration token (recommended)**
 
 ```bash
-export NOTION_TOKEN=secret_xxx
+export NOTION_TOKEN=ntn_xxx
 ```
 
 The `NOTION_TOKEN` env var takes priority over a stored login if both are present. It is never

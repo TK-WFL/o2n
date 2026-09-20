@@ -19,7 +19,7 @@ Requires Node.js 20+.
 ## Connect to Notion
 
 ```bash
-export NOTION_TOKEN=secret_xxx
+export NOTION_TOKEN=ntn_xxx
 ```
 
 The destination parent page must already be connected to that integration in Notion
