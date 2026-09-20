@@ -83,6 +83,8 @@ npx @tk_wfl/o2n-cli resume <vaultPath>
 
 # 5. Verify and inspect the report
 npx @tk_wfl/o2n-cli verify <vaultPath>
+# --deep also fetches the real Notion pages and checks existence/trash, leftover placeholders and attachment counts (read-only)
+npx @tk_wfl/o2n-cli verify <vaultPath> --deep
 npx @tk_wfl/o2n-cli report <vaultPath>
 ```
 
@@ -91,7 +93,7 @@ Exit codes: `0` = fully succeeded, `1` = some notes failed, `2` = fatal error.
 ## MCP server usage
 
 Register `@tk_wfl/o2n-mcp-server` as a stdio MCP server in Claude Desktop / Claude Code.
-Tools: `scan_vault` / `get_plan` / `update_plan` / `prepare_migration` / `commit_migration` / `migration_status` / `get_report`.
+Tools: `scan_vault` / `get_plan` / `update_plan` / `prepare_migration` / `commit_migration` / `migration_status` / `verify_migration` / `get_report`.
 
 MCP access requires `O2N_ALLOWED_VAULTS=/absolute/path/to/vault` (comma-separated for multiple
 vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and

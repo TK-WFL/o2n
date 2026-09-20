@@ -35,7 +35,7 @@ npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionPageId>
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
 npx @tk_wfl/o2n-cli resume <vaultPath>
-npx @tk_wfl/o2n-cli verify <vaultPath>
+npx @tk_wfl/o2n-cli verify <vaultPath>          # add --deep to compare against the real Notion pages
 npx @tk_wfl/o2n-cli report <vaultPath>
 ```
 

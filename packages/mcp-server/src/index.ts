@@ -24,6 +24,8 @@ import {
   estimateBlockCount,
   wasAbortedByBlockLimit,
   rateLimitFromEnv,
+  deepVerifyNotes,
+  summarizeState,
 } from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
 import { getJob, setJob } from './jobs.js';
@@ -348,6 +350,35 @@ server.tool(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     return text(JSON.stringify({ job: job ?? { status: 'not_started' }, noteStatusCounts: stateSummary }, null, 2));
+  },
+);
+
+server.tool(
+  'verify_migration',
+  '移行後検証。state.json と vault を突き合わせ、deep=true なら Notion の実ページも取得して照合する（読み取りのみ。Notion 側は変更しない）。',
+  {
+    vaultPath: z.string().describe('Obsidian vaultの絶対パス'),
+    deep: z.boolean().optional().describe('true なら done ノートの実ページを1ノート1リクエストで取得し、存在・プレースホルダー残り・添付数を照合する'),
+  },
+  async ({ vaultPath, deep }) => {
+    const guard = await guardVaultPath(vaultPath);
+    if (guard.error) return guard.error;
+    let state: StateFile;
+    try {
+      state = JSON.parse(await readVaultStateFile(guard.vaultPath, 'state.json')) as StateFile;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return text('state.json がありません。先に移行を実行してください。');
+    }
+    const inventory = await scanVault(guard.vaultPath);
+    const summary = summarizeState(state, inventory);
+    if (!deep) return text(JSON.stringify(summary, null, 2));
+
+    const token = process.env.NOTION_TOKEN ?? (await loadCredentials())?.token ?? '';
+    if (!token) return text('Notionと連携されていません。NOTION_TOKEN を設定してください。');
+    const api = new NotionApi(new NotionClient({ token, dryRun: false, rateLimit: rateLimitFromEnv() }));
+    const result = await deepVerifyNotes(api, state);
+    return text(JSON.stringify({ ...summary, deep: result }, null, 2));
   },
 );
 

@@ -83,10 +83,11 @@ program
 
 program
   .command('verify')
-  .description('移行後検証（件数照合・未解決リンク数）')
+  .description('移行後検証（件数照合・未解決リンク数）。--deep で Notion の実ページと照合する')
   .argument('<vaultPath>', 'Obsidian vaultのパス')
-  .action(async (vaultPath: string) => {
-    const code = await verifyCommand(vaultPath);
+  .option('--deep', 'Notion の実ページを取得し、ページの存在・プレースホルダー残り・添付数を照合する（読み取りのみ）')
+  .action(async (vaultPath: string, opts: { deep?: boolean }) => {
+    const code = await verifyCommand(vaultPath, opts);
     process.exitCode = code;
   });
 
