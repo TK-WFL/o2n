@@ -132,7 +132,7 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
     // 量指定子ごと削除して曖昧さを構造的に排除している。
     const calloutMatch = /^>[ \t]?\[!(\w+)\]([-+]?)(.*)$/.exec(line);
     if (calloutMatch) {
-      const [, rawType, , titleText] = calloutMatch;
+      const [, rawType, fold, titleText] = calloutMatch;
       const type = (rawType ?? '').toLowerCase();
       const style = CALLOUT_TYPE_MAP[type] ?? DEFAULT_CALLOUT;
       if (!CALLOUT_TYPE_MAP[type]) {
@@ -151,6 +151,17 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
       const title = (titleText ?? '').trim() || type.charAt(0).toUpperCase() + type.slice(1);
       // §16検証済み: callout内の改行は\nではなく<br>でないと</callout>の位置がずれて壊れる
       const body = bodyLines.join('<br>').trim();
+      if (fold === '-') {
+        // 折りたたみ callout（既定で閉じる）は Notion のトグルに変換する（#75）。
+        // 実ワークスペース検証（2026-09-20、docs/questions.md §19）: <details> は
+        // 1行に書くと認識されず、<details>/<summary>/本文/</details> を別行にすると
+        // toggle ブロックになり、内側の <callout> も子ブロックとして保持される。
+        // `+`（既定で開く）は通常 callout のまま（Notion の callout は常に展開表示）。
+        const inner = body ? `\n<callout icon="${style.icon}" color="${style.color}">${body}</callout>` : '';
+        out.push(`<details>\n<summary>**${title}**</summary>${inner}\n</details>`);
+        i = j;
+        continue;
+      }
       out.push(`<callout icon="${style.icon}" color="${style.color}">**${title}**${body ? `<br>${body}` : ''}</callout>`);
       i = j;
       continue;
