@@ -1,4 +1,4 @@
-import { scanVault } from '@tk_wfl/o2n-core';
+import { blockLimitWarning, estimateBlockCount, scanVault } from '@tk_wfl/o2n-core';
 
 export async function scanCommand(vaultPath: string, opts: { verbose?: boolean }): Promise<void> {
   const inventory = await scanVault(vaultPath);
@@ -9,6 +9,10 @@ export async function scanCommand(vaultPath: string, opts: { verbose?: boolean }
   console.log(`wikilink数: ${inventory.wikiLinks.length}`);
   console.log(`スキップ予定: ${inventory.skipped.length}`);
   console.log(`警告: ${inventory.warnings.length}`);
+  const estimatedBlocks = estimateBlockCount(inventory);
+  console.log(`推定ブロック数: 約${estimatedBlocks.toLocaleString()}`);
+  const limitWarning = blockLimitWarning(estimatedBlocks);
+  if (limitWarning) console.log(`\n⚠ ${limitWarning}`);
 
   console.log('\nフォルダツリー:');
   for (const [folder, notes] of Object.entries(inventory.folderTree).sort()) {

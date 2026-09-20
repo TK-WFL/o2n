@@ -3,6 +3,7 @@ import {
   atomicWriteVaultStateFile,
   scanVault,
   runMigration,
+  wasAbortedByBlockLimit,
   NotionClient,
   NotionApi,
   StateStore,
@@ -79,10 +80,14 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   const failedCount = Object.values(state.snapshot.notes).filter((n) => n.status === 'failed').length;
   console.log(`\n成功: ${report.successCount}件 / 失敗: ${failedCount}件`);
   console.log(`レポート: ${path.join(vaultPath, '.o2n', 'report.md')}`);
+  if (wasAbortedByBlockLimit(entries)) {
+    const aborted = entries.find((e) => e.category === 'aborted');
+    console.error(`\n⚠ ${aborted?.message ?? '移行を中断しました'}`);
+  }
 
   if (opts.verbose) {
     for (const e of entries) console.log(`  [${e.category}] ${e.path}: ${e.message}`);
   }
 
-  return failedCount > 0 ? 1 : 0;
+  return failedCount > 0 || wasAbortedByBlockLimit(entries) ? 1 : 0;
 }

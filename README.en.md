@@ -101,6 +101,19 @@ is suggested automatically (the final call is always made by the user via `plan`
 Roughly 1,000 notes + 500 attachments ≈ 4,000–5,000 API calls ≈ ~30–40 minutes at an effective
 rate of 2.5 req/s.
 
+## Notion Free plan block limit
+
+Since September 2026, **multi-member Free workspaces** have a lifetime cap of 1,000 blocks that is
+also enforced by the API ([reference](https://developers.notion.com/reference/workspace-block-limits)).
+Once reached, creation requests are rejected with `403 restricted_resource`, and deleting blocks does
+not restore capacity.
+
+- `o2n scan` / `o2n plan` print an estimated block count and warn up front when it exceeds 1,000
+- If the limit is hit during migration, o2n stops immediately instead of failing note by note and
+  records it under "aborted" in the report. Notes not yet started stay untouched, so after changing
+  the plan you can continue with `o2n resume`
+- Personal access tokens (PAT), paid plans, and single-member Free workspaces are not subject to the limit
+
 ## Repository layout
 
 ```

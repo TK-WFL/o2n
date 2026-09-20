@@ -27,6 +27,30 @@ export class NotionApiError extends Error {
   }
 }
 
+/**
+ * Notion Free プラン（複数メンバー）のワークスペース生涯ブロック上限（1,000）に達した。
+ * 2026-09-01 から REST API でも強制され、作成系リクエストは
+ * `403 restricted_resource` + `additional_data.block_limit: "block_creation"` で拒否される。
+ * リトライしても解消せず、ブロックを削除しても枠は戻らない。
+ * https://developers.notion.com/reference/workspace-block-limits
+ */
+export class NotionBlockLimitError extends NotionApiError {
+  constructor(raw?: unknown) {
+    super(403, 'restricted_resource', BLOCK_LIMIT_MESSAGE, raw);
+    this.name = 'NotionBlockLimitError';
+  }
+}
+
+export const BLOCK_LIMIT_MESSAGE =
+  'Notion Free プラン（複数メンバー）のブロック上限（1,000ブロック）に達したため移行を中断しました。' +
+  'ワークスペースのプランをアップグレードするか、メンバーを1人にしてから `o2n resume` で続きから再開できます。' +
+  '個人アクセストークン（PAT）はこの上限の対象外です。';
+
+function isBlockLimitBody(body: unknown): boolean {
+  const b = body as { code?: string; additional_data?: { block_limit?: unknown } } | undefined;
+  return b?.code === 'restricted_resource' && typeof b.additional_data?.block_limit === 'string';
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -172,6 +196,7 @@ export class NotionClient {
 
     if (!res.ok) {
       const body = await safeJson(res);
+      if (res.status === 403 && isBlockLimitBody(body)) throw new NotionBlockLimitError(body);
       const b = body as { code?: string; message?: string };
       throw new NotionApiError(res.status, b?.code, `Notion API error ${res.status}: ${b?.message ?? res.statusText}`, body);
     }

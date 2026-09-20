@@ -168,7 +168,9 @@ export interface ReportEntry {
     | 'unresolved_link'
     | 'oversized_file'
     | 'downgraded'
-    | 'warning';
+    | 'warning'
+    /** 移行全体を途中で中断した（例: Notion Free プランのブロック上限）。path は中断時点のノート */
+    | 'aborted';
   path: string;
   message: string;
 }

@@ -3,7 +3,9 @@ import { confirm, input } from '@inquirer/prompts';
 import {
   atomicWriteRegularFileNoFollow,
   atomicWriteVaultStateFile,
+  blockLimitWarning,
   buildPlan,
+  estimateBlockCount,
   scanVault,
   suggestFolderModes,
   type FolderPlan,
@@ -17,6 +19,11 @@ export interface PlanCommandOptions {
 
 export async function planCommand(vaultPath: string, opts: PlanCommandOptions): Promise<string> {
   const inventory = await scanVault(vaultPath);
+
+  const estimatedBlocks = estimateBlockCount(inventory);
+  console.log(`ノート数: ${inventory.notes.length} / 添付: ${inventory.attachments.length} / 推定ブロック数: 約${estimatedBlocks.toLocaleString()}`);
+  const limitWarning = blockLimitWarning(estimatedBlocks);
+  if (limitWarning) console.log(`\n⚠ ${limitWarning}\n`);
 
   const parentPageId =
     opts.parent ?? (await input({ message: '移行先のNotion親ページIDを入力してください:' }));
