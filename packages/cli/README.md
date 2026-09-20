@@ -22,8 +22,10 @@ Requires Node.js 20+.
 export NOTION_TOKEN=ntn_xxx
 ```
 
-The destination parent page must already be connected to that integration in Notion
-(Notion page → `...` menu → Connections).
+Simplest: a **personal access token** from Notion's developer portal (Personal access tokens →
+New token). It writes with your own permissions, so no per-page connect step is needed.
+If you use an internal integration token instead, the destination parent page must already be
+connected to that integration in Notion (page → `...` menu → Connections).
 
 ## Commands
 

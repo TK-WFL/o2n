@@ -25,18 +25,32 @@ Node.js 20+ が必要。
 
 ## 使い方（CLI）
 
-### Notionとの連携（2通り）
+### Notionとの連携（3通り）
 
-**方法A: internal integrationトークンを直接指定（推奨）**
+いずれの方法でもトークンは `NOTION_TOKEN` 環境変数で渡す（コマンドライン引数では受け取らない。
+シェル履歴への漏洩防止）。`NOTION_TOKEN` が設定されていれば保存済みのログイン情報より優先される。
+
+**方法A: 個人アクセストークン（PAT）を使う（推奨・いちばん簡単）**
+
+Notionの[開発者ポータル「Personal access tokens」](https://www.notion.so/developers/tokens)で
+「New token」→ 名前・権限（Notion API）・有効期限（7日〜1年）を選んで作成し、表示されたトークンを設定する
+（トークンは作成時にしか表示されない）。
 
 ```bash
 export NOTION_TOKEN=ntn_xxx
 ```
 
-`NOTION_TOKEN`環境変数が設定されていればそちらが優先される。コマンドライン引数では
-受け取らない（シェル履歴への漏洩防止）。
+- 作成した本人がアクセスできるページにそのまま書き込めるため、**ページごとにintegrationを接続する手順が不要**
+- 有効期限付きで、ワークスペース管理者が一覧・失効できる
+- Notion Freeプランのブロック上限（後述）の対象外
+- 2026年5月に追加された機能。古いワークスペース設定では「Connections」タブから辿れる
 
-**方法B: ブラウザでログイン（既定停止中）**
+**方法B: internal integrationトークンを使う**
+
+ワークスペース単位で動かすintegrationを作り、そのトークンを設定する（方法Aと同じ `ntn_` 形式）。
+移行先の親ページをそのintegrationに**接続（Connect）**しておく必要がある（下記「コマンド一覧」参照）。
+
+**方法C: ブラウザでログイン（既定停止中）**
 
 ```bash
 npx @tk_wfl/o2n-cli login
@@ -48,9 +62,10 @@ npx @tk_wfl/o2n-cli login
 
 ### コマンド一覧
 
-移行先にする親ページは、事前にNotion側で使用中のintegration（internal integrationまたは`o2n login`で
-連携したintegration）に**接続（Connect）**しておく必要がある。未接続のページを指定すると、
-`plan`/`migrate`実行時に`404 Could not find page`エラーになる。
+方法B/C（internal integration / `o2n login`）の場合、移行先にする親ページは事前にNotion側でその
+integrationに**接続（Connect）**しておく必要がある（ページ右上の`…`→「接続先」）。未接続のページを
+指定すると、`plan`/`migrate`実行時に`404 Could not find page`エラーになる。方法A（PAT）では
+本人がアクセスできるページなら接続手順は不要。
 
 ```bash
 # 1. vaultを走査（読み取りのみ）

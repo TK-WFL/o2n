@@ -25,18 +25,32 @@ Requires Node.js 20+.
 
 ## CLI usage
 
-### Connecting to Notion (two ways)
+### Connecting to Notion (three ways)
 
-**Option A: internal integration token (recommended)**
+In every case the token is passed through the `NOTION_TOKEN` env var (never as a CLI argument, to
+avoid leaking it into shell history). `NOTION_TOKEN` takes priority over a stored login if both exist.
+
+**Option A: personal access token (PAT) — recommended, simplest**
+
+In Notion's [developer portal → Personal access tokens](https://www.notion.so/developers/tokens)
+select "New token", pick a name, the Notion API capability and an expiration (7 days to 1 year),
+copy the token (it is shown only once) and set it:
 
 ```bash
 export NOTION_TOKEN=ntn_xxx
 ```
 
-The `NOTION_TOKEN` env var takes priority over a stored login if both are present. It is never
-accepted as a CLI argument (to avoid leaking it into shell history).
+- Writes with your own permissions, so **no per-page "Connect" step is needed**
+- Expiring, and workspace admins can list and revoke it
+- Not subject to the Notion Free plan block limit (see below)
+- Added in May 2026; older workspace settings expose it under the "Connections" tab
 
-**Option B: browser login (disabled by default)**
+**Option B: internal integration token**
+
+Create a workspace-level integration and use its token (same `ntn_` format as Option A). The
+destination parent page must be **connected** to that integration (see "Commands" below).
+
+**Option C: browser login (disabled by default)**
 
 ```bash
 npx @tk_wfl/o2n-cli login
@@ -48,9 +62,10 @@ flow. If you used `o2n login` with an older version, revoke and re-issue the Not
 
 ### Commands
 
-Before running `plan`/`migrate`, the destination parent page must already be **connected** to the
-integration you're using (an internal integration, or the one linked via `o2n login`) in Notion.
-An unconnected page causes a `404 Could not find page` error at `plan`/`migrate` time.
+With Option B/C (internal integration / `o2n login`), the destination parent page must already be
+**connected** to that integration in Notion (page `…` menu → Connections) before running
+`plan`/`migrate`; an unconnected page causes a `404 Could not find page` error. With Option A (PAT)
+no connect step is needed for pages you can access.
 
 ```bash
 # 1. Scan the vault (read-only)

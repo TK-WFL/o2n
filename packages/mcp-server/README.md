@@ -16,7 +16,8 @@ npx -y @tk_wfl/o2n-mcp-server
 ```
 
 Requires Node.js 20+, and `NOTION_TOKEN` (or a stored `o2n login` credential) in the
-environment the MCP server runs in.
+environment the MCP server runs in. The simplest token is a Notion **personal access token**
+(developer portal → Personal access tokens → New token); it needs no per-page connect step.
 
 MCP access requires `O2N_ALLOWED_VAULTS=/absolute/path/to/vault` (comma-separated for multiple
 vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
