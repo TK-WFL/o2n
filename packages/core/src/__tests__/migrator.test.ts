@@ -629,3 +629,27 @@ describe('databaseモード（#67）', () => {
     for (const p of ['Tasks/A.md', 'Tasks/B.md', 'Tasks/C.md']) expect(state.getNote(p)?.status).toBe('done');
   });
 });
+
+describe('aliases によるリンク解決（#77）', () => {
+  it('[[別名]] は frontmatter aliases を持つノートのページリンクになり unresolved_link にならない', async () => {
+    await fs.writeFile(path.join(tmpDir, 'Aliased.md'), '---\naliases:\n  - 別名A\n---\n# Aliased\n');
+    await fs.writeFile(path.join(tmpDir, 'Linker.md'), '# Linker\n\n[[別名A]] と [[存在しない]]\n');
+    const { fetchImpl, calls } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+    const state = await StateStore.load(tmpDir, 'root-page');
+
+    const report = await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+
+    const aliasedPageId = state.getNote('Aliased.md')?.pageId;
+    expect(aliasedPageId).toBeDefined();
+    const linkPatch = calls.find(
+      (c) => c.method === 'PATCH' && /markdown$/.test(c.path) && JSON.stringify(c.body).includes('別名A'),
+    );
+    expect(JSON.stringify(linkPatch?.body)).toContain(`notion.so/${aliasedPageId}`);
+    expect(report.some((e) => e.category === 'unresolved_link' && e.message.includes('別名A'))).toBe(false);
+    expect(report.some((e) => e.category === 'unresolved_link' && e.message.includes('存在しない'))).toBe(true);
+  });
+});

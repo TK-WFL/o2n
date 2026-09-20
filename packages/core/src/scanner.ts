@@ -147,6 +147,43 @@ export function buildNameIndex(paths: string[]): Map<string, string[]> {
 }
 
 /**
+ * frontmatter の `aliases`（文字列または文字列配列。Obsidian 旧形式の `alias` も可）→ ノートパス一覧の
+ * インデックスを作る。Obsidian は `[[別名]]` を aliases に一致するノートへ解決するため（#77）。
+ */
+export function buildAliasIndex(notes: Array<Pick<NoteRecord, 'path' | 'frontmatter'>>): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+  for (const note of notes) {
+    const raw = note.frontmatter.aliases ?? note.frontmatter.alias;
+    const values = Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw];
+    for (const v of values) {
+      if (typeof v !== 'string' && typeof v !== 'number') continue;
+      const key = String(v).trim();
+      if (!key) continue;
+      const list = index.get(key) ?? [];
+      if (!list.includes(note.path)) list.push(note.path);
+      index.set(key, list);
+    }
+  }
+  return index;
+}
+
+/**
+ * ノートリンクの解決: ファイル名一致を優先し、見つからなければ aliases で探す。
+ * どちらも曖昧さの扱いは resolveByFilename と同じ（パス近接→警告）。
+ */
+export function resolveNoteLink(
+  target: string,
+  sourcePath: string,
+  nameIndex: Map<string, string[]>,
+  aliasIndex: Map<string, string[]>,
+): { resolved: string | null; warning?: NoteResolutionWarning } {
+  const byName = resolveByFilename(target, sourcePath, nameIndex);
+  if (byName.resolved !== null) return byName;
+  if (!aliasIndex.has(target.trim())) return byName;
+  return resolveByFilename(target.trim(), sourcePath, aliasIndex);
+}
+
+/**
  * Obsidianの挙動に合わせたノート名解決: ファイル名一致→曖昧ならパス近接→なお曖昧なら警告
  */
 export function resolveByFilename(

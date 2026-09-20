@@ -85,7 +85,7 @@ vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
 
 ## What gets converted
 
-- Wikilinks (`[[note]]`, aliases, heading links, etc.) → Notion page-to-page links
+- Wikilinks (`[[note]]`, display text, heading links, etc.) → Notion page-to-page links; `[[alias]]` matching a note's frontmatter `aliases` resolves to that note
 - Frontmatter → in-page metadata (page-tree mode) or database properties (database mode)
 - Images, PDFs, and other attachments → uploaded and shown in their original position
 - Obsidian callouts → Notion callouts (all 13 official types and their aliases mapped to icon/color; unknown types fall back to gray and are reported)

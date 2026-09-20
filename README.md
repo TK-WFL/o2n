@@ -85,7 +85,7 @@ MCPからvaultへアクセスするには、`O2N_ALLOWED_VAULTS=/absolute/path/t
 
 ## 変換される内容
 
-- Wikilink（`[[ノート]]`、エイリアス、見出しリンクなど）→ Notionページ間リンク
+- Wikilink（`[[ノート]]`、表示名、見出しリンクなど）→ Notionページ間リンク。frontmatter `aliases` に一致する `[[別名]]` もそのノートに解決
 - frontmatter → ページ内メタ情報（page_treeモード）またはデータベースのプロパティ（databaseモード）
 - 画像・PDF等の添付ファイル → アップロードして元の位置に表示
 - Obsidianのcallout → Notionのcallout（Obsidian公式の全13種別＋別名を色・アイコンに対応。未知の種別はグレーで保持しレポート）
