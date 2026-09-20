@@ -355,6 +355,20 @@ const ATTACHMENT_EXTENSIONS = new Set([
 ]);
 
 /**
+ * ATX 見出しの閉じ `#`（`## 見出し ##`）を取り除く。`## C#` のように空白を挟まない `#` は残す。
+ * 正規表現（`[ \t]+#+$`）だと CodeQL の polynomial-redos 指摘になるため文字列走査で行う。
+ */
+function stripClosingHashes(title: string): string {
+  let end = title.length;
+  while (end > 0 && title[end - 1] === '#') end -= 1;
+  if (end === title.length) return title; // 閉じ # なし
+  if (end === 0) return ''; // `#` だけの見出し
+  const ch = title[end - 1];
+  if (ch !== ' ' && ch !== '\t') return title; // `C#` のような語尾の # は見出し文字列の一部
+  return title.slice(0, end).trimEnd();
+}
+
+/**
  * 見出し指定の埋め込み `![[Note#見出し]]` 用: その見出しから、同じか浅いレベルの次の見出しの
  * 直前までを切り出す。コードブロック内の `#` 行は見出しとして扱わない。見つからなければ null。
  */
@@ -374,7 +388,7 @@ export function extractSection(content: string, heading: string): string | null 
     const m = /^(#{1,6})[ \t]/.exec(line);
     if (!m) continue;
     const l = m[1]!.length;
-    const title = line.slice(l).trim().replace(/[ \t]+#+$/, '').replace(/^#+$/, '').trim();
+    const title = stripClosingHashes(line.slice(l).trim());
     if (start === -1) {
       if (title.toLowerCase() === wanted) {
         start = i;

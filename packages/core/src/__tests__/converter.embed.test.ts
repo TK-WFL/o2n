@@ -29,6 +29,8 @@ describe('extractSection', () => {
   it('見つからなければ null。閉じ # 付き見出し（## A ##）も一致する', () => {
     expect(extractSection(md, 'Z')).toBeNull();
     expect(extractSection('## A ##\nx', 'A')).toBe('## A ##\nx');
+    expect(extractSection('## C#\nx', 'C#')).toBe('## C#\nx');
+    expect(extractSection('## C# ##\nx', 'C#')).toBe('## C# ##\nx');
   });
 
   it('大量のタブや # を含む行でも短時間で終える（ReDoS 回帰）', () => {
