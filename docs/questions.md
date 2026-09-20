@@ -224,3 +224,22 @@ gray-matter(js-yaml)は無引用のYYYY-MM-DD等をDate型としてパースす�
 - `#####` / `######`（h5/h6）は Notion 側で自動的に `heading_4` になる（本文の欠落なし）。#73 参照
 - `- [/]` `- [-]` などタスクの拡張状態は `to_do` にならず、`[/] text` という文字列を含む
   `bulleted_list_item` になる。#79 参照
+
+## 20. ネストしたブロック直後への挿入は「直接の親」を `PATCH /blocks/:id/children` の対象にする（実ワークスペースで検証済み、2026-09-20）
+
+**該当**: `packages/core/src/migrator.ts` `findPlaceholderBlocks` / Pass3
+
+`position: { type: 'after_block', after_block: { id } }` の `id` は、PATCH 対象ブロックの**直接の子**で
+なければならない。ネストしたリスト項目（`  - ![[img.png]]`）内のプレースホルダーに対してページIDを
+対象にすると `400 Block ID … to append children after is not parented by <pageId>` になる。
+#66 でネスト探索を入れた際に挿入先をページ固定のままにしていたため、#82 の全体動作確認で発覚。
+探索時に親IDを一緒に記録し、その親に対して挿入するよう修正した（#100）。
+
+同じ全体動作確認（fixture 23ノート・添付6件を「全体動作確認 #82 (削除可)」配下へ移行、
+`verify --deep` 不一致0）で確認した各項目:
+- callout 全種別・別名（#74）、折りたたみ callout → トグル（#75）、色付きハイライト（#76）、
+  aliases リンク（#77）、h5/h6 → h4（#73）、タスク拡張状態（#79）、インラインコード保護（#79）、
+  Excalidraw の画像化・`.base` のスキップ（#78）、100ブロック超＋ネストリスト内の添付（#66）、
+  埋め込みのインライン展開と見出しセクション展開（#80）はいずれも期待通り
+- DBモード（#67）: `DatabaseFolder` の3行が `data_source_id` 親で作成され、`FrontmatterAllTypes.md` の
+  2000字超 `longtext` を含むノートもエラーなく作成される
