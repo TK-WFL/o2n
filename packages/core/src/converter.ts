@@ -368,11 +368,15 @@ export function extractSection(content: string, heading: string): string | null 
     const line = lines[i]!;
     if (/^\s{0,3}(`{3,}|~{3,})/.test(line)) inFence = !inFence;
     if (inFence) continue;
-    const m = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(line);
+    // ReDoS対策（CodeQL js/polynomial-redos）: 見出しテキストの後ろの空白・閉じ#を正規表現で
+    // 消費すると `(.+?)` と文字集合が重なる。正規表現は「#の並び＋空白1つ以上」だけを見て、
+    // タイトルの整形（末尾の空白と閉じ # の除去）は文字列操作で行う
+    const m = /^(#{1,6})[ \t]/.exec(line);
     if (!m) continue;
     const l = m[1]!.length;
+    const title = line.slice(l).trim().replace(/[ \t]+#+$/, '').replace(/^#+$/, '').trim();
     if (start === -1) {
-      if (m[2]!.trim().toLowerCase() === wanted) {
+      if (title.toLowerCase() === wanted) {
         start = i;
         level = l;
       }
@@ -464,7 +468,7 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
       entries.push({
         category: 'downgraded',
         path: ctx.sourcePath,
-        message: `ノート埋め込み "![[${target}]]" をリンクに降格しました`,
+        message: `ノート埋め込み "![[${anchor ? `${target}#${anchor}` : target}]]" をリンクに降格しました`,
       });
       if (!resolved) {
         entries.push({ category: 'unresolved_link', path: ctx.sourcePath, message: `埋め込みリンク先 "${target}" が見つかりませんでした` });

@@ -442,8 +442,17 @@ async function uploadFile(
   return created.id;
 }
 
+interface PlaceholderLocation {
+  blockId: string;
+  /** プレースホルダーブロックの直接の親（ページ本体ならページID）。after_block で挿入する際の親に使う */
+  parentId: string;
+}
+
 /**
- * ページ内から添付プレースホルダーを含むブロックを探し、placeholder → blockId の対応を返す。
+ * ページ内から添付プレースホルダーを含むブロックを探し、placeholder → { blockId, parentId } の対応を返す。
+ * 実ワークスペースで確認（2026-09-20、#82）: ネストしたリスト項目内のプレースホルダーの直後に挿入するには
+ * `PATCH /blocks/{直接の親}/children` に after_block を渡す必要があり、ページIDを親にすると
+ * 400 "Block ID … to append children after is not parented by …" になる。
  * - 子ブロック一覧はページネーションで全件取得する（100ブロック超対応）
  * - ネストしたリスト項目など `has_children` のブロックは再帰して探す（深さ上限 maxDepth）。
  *   ただし子ページ/子DBの中には入らない
@@ -454,8 +463,8 @@ async function findPlaceholderBlocks(
   pageId: string,
   wanted: Set<string>,
   maxDepth = 3,
-): Promise<Map<string, string>> {
-  const found = new Map<string, string>();
+): Promise<Map<string, PlaceholderLocation>> {
+  const found = new Map<string, PlaceholderLocation>();
   const remaining = new Set(wanted);
 
   async function search(blockId: string, depth: number): Promise<void> {
@@ -467,7 +476,7 @@ async function findPlaceholderBlocks(
       const json = JSON.stringify(block);
       for (const ph of remaining) {
         if (json.includes(ph)) {
-          found.set(ph, block.id);
+          found.set(ph, { blockId: block.id, parentId: blockId });
           remaining.delete(ph);
         }
       }
@@ -522,7 +531,7 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       if (state.getFile(file.targetPath)?.status === 'skipped') continue;
       lookupTargets.add(file.placeholder);
     }
-    let placeholderBlocks = new Map<string, string>();
+    let placeholderBlocks = new Map<string, PlaceholderLocation>();
     if (!dryRun && lookupTargets.size > 0) {
       try {
         placeholderBlocks = await findPlaceholderBlocks(api, noteState.pageId, lookupTargets);
@@ -575,8 +584,8 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       }
 
       try {
-        const placeholderBlockId = placeholderBlocks.get(file.placeholder);
-        if (!placeholderBlockId) {
+        const location = placeholderBlocks.get(file.placeholder);
+        if (!location) {
           // この修正より前に作られたstate.json（attachedPlaceholders未記録）は、
           // 過去の実行で正常に貼り付け済みでも記録が残っていない。ファイル自体が
           // 既に'attached'なら「見つからない」のは過去の正常完了である可能性が高いため、
@@ -590,8 +599,8 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
           continue;
         }
         const ext = file.targetPath.split('.').pop() ?? '';
-        await api.appendBlockChildren(noteState.pageId, [buildAttachmentBlock(fileUploadId!, ext)], placeholderBlockId);
-        await api.deleteBlock(placeholderBlockId);
+        await api.appendBlockChildren(location.parentId, [buildAttachmentBlock(fileUploadId!, ext)], location.blockId);
+        await api.deleteBlock(location.blockId);
         await state.setFile(file.targetPath, { status: 'attached', fileUploadId });
         attachedPlaceholders.add(file.placeholder);
         await state.setNote(note.path, { ...state.getNote(note.path)!, attachedPlaceholders: [...attachedPlaceholders] });

@@ -26,8 +26,16 @@ describe('extractSection', () => {
     expect(extractSection(md, 'B')).toBe('## B\nb1\n\n```\n## not heading\n```\n');
     expect(extractSection(md, 'c')).toBe('## C\nc1');
   });
-  it('見つからなければ null', () => {
+  it('見つからなければ null。閉じ # 付き見出し（## A ##）も一致する', () => {
     expect(extractSection(md, 'Z')).toBeNull();
+    expect(extractSection('## A ##\nx', 'A')).toBe('## A ##\nx');
+  });
+
+  it('大量のタブや # を含む行でも短時間で終える（ReDoS 回帰）', () => {
+    const evil = ['#'.repeat(6) + ' ' + '\t\t'.repeat(30_000) + '#', '# ' + 'a'.repeat(50_000) + ' \t#'.repeat(1000)].join('\n');
+    const started = Date.now();
+    extractSection(evil, 'nope');
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 });
 
