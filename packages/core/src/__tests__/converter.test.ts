@@ -142,6 +142,34 @@ describe('convertNote §6 変換表', () => {
     expect(result.entries.some((e) => e.message.includes('見出しレベル5〜6'))).toBe(false);
   });
 
+  it('インラインコード内の [[x]] / ==x== / %%x%% / ![[x]] は変換されない（#79）', () => {
+    const result = convertNote('本文 `[[Not Link]]` と `==not highlight==` と `%%not comment%%` と `![[no.png]]`', ctx());
+    expect(result.markdown).toBe('本文 `[[Not Link]]` と `==not highlight==` と `%%not comment%%` と `![[no.png]]`');
+    expect(result.pendingLinks).toHaveLength(0);
+    expect(result.pendingFiles).toHaveLength(0);
+    expect(result.entries).toHaveLength(0);
+  });
+
+  it('インラインコードの外側は従来通り変換され、二重バッククォート内の単一バッククォートも保護される', () => {
+    const result = convertNote('[[Real]] と `` `[[x]]` `` と ==hi==', ctx());
+    expect(result.markdown).toBe('⟦o2n-link-0⟧ と `` `[[x]]` `` と <span color="yellow_bg">hi</span>');
+    expect(result.pendingLinks).toHaveLength(1);
+  });
+
+  it('タスクの拡張状態は [ ] に正規化し元の記号を残す。[X] は [x] に、[ ]/[x] はそのまま（#79）', () => {
+    const result = convertNote('- [ ] todo\n- [x] done\n- [X] DONE\n- [/] half\n  - [-] cancelled\n1. [>] forwarded\n', ctx());
+    expect(result.markdown).toBe('- [ ] todo\n- [x] done\n- [x] DONE\n- [ ] (/) half\n  - [ ] (-) cancelled\n1. [ ] (>) forwarded\n');
+    const d = result.entries.filter((e) => e.category === 'downgraded' && e.message.includes('タスクの拡張状態'));
+    expect(d).toHaveLength(1);
+    expect(d[0]!.message).toContain('3箇所');
+  });
+
+  it('行頭以外の [/] や本文中の [x] は触らない', () => {
+    const result = convertNote('文中の [/] は記号\n- 通常 [x] 項目\n', ctx());
+    expect(result.markdown).toBe('文中の [/] は記号\n- 通常 [x] 項目\n');
+    expect(result.entries).toHaveLength(0);
+  });
+
   it('未知のcallout種別はデフォルト(ℹ️/gray)に変換されレポートされる', () => {
     const result = convertNote('> [!custom] T\n> b', ctx());
     expect(result.markdown).toContain('icon="ℹ️" color="gray_bg"');
@@ -280,6 +308,22 @@ describe('wikilink解析のReDoS耐性（セキュリティ回帰テスト）', 
       '[' + '[a'.repeat(50_000),
       '![' + '![a'.repeat(50_000),
       '[^' + '[^a'.repeat(50_000),
+    ];
+    for (const evil of inputs) {
+      const started = Date.now();
+      convertNote(evil, ctx());
+      expect(Date.now() - started).toBeLessThan(1_000);
+    }
+  });
+});
+
+describe('インラインコード/タスク正規化のReDoS耐性（#79）', () => {
+  it('閉じないバッククォートや [ の大量反復でも短時間で終える', () => {
+    const inputs = [
+      '`'.repeat(50_000),
+      '``' + 'a`'.repeat(50_000),
+      '- ' + '[/'.repeat(50_000),
+      ('- [/] x\n').repeat(20_000),
     ];
     for (const evil of inputs) {
       const started = Date.now();
