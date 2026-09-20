@@ -43,12 +43,47 @@ export interface ConverterContext {
   resolveAttachment: (target: string) => string | null;
 }
 
-const CALLOUT_TYPE_MAP: Record<string, { icon: string; color: string }> = {
+/**
+ * Obsidian 公式の callout 種別と別名（help/editing-and-formatting/callouts）を
+ * Notion callout のアイコン/背景色に対応付ける。Obsidian 側の配色に寄せている。
+ * 未知の種別は DEFAULT_CALLOUT に落とし、downgraded として報告する。
+ */
+const CALLOUT_STYLES = {
   note: { icon: '💡', color: 'blue_bg' },
-  warning: { icon: '⚠️', color: 'orange_bg' },
-  tip: { icon: '💡', color: 'green_bg' },
+  abstract: { icon: '📋', color: 'blue_bg' },
   info: { icon: 'ℹ️', color: 'gray_bg' },
-  danger: { icon: '⛔', color: 'red_bg' },
+  todo: { icon: '☑️', color: 'blue_bg' },
+  tip: { icon: '🔥', color: 'green_bg' },
+  success: { icon: '✅', color: 'green_bg' },
+  question: { icon: '❓', color: 'yellow_bg' },
+  warning: { icon: '⚠️', color: 'orange_bg' },
+  failure: { icon: '❌', color: 'red_bg' },
+  danger: { icon: '⚡', color: 'red_bg' },
+  bug: { icon: '🐛', color: 'red_bg' },
+  example: { icon: '📝', color: 'purple_bg' },
+  quote: { icon: '💬', color: 'gray_bg' },
+} as const satisfies Record<string, { icon: string; color: string }>;
+
+const CALLOUT_ALIASES: Record<string, keyof typeof CALLOUT_STYLES> = {
+  summary: 'abstract',
+  tldr: 'abstract',
+  hint: 'tip',
+  important: 'tip',
+  check: 'success',
+  done: 'success',
+  help: 'question',
+  faq: 'question',
+  caution: 'warning',
+  attention: 'warning',
+  fail: 'failure',
+  missing: 'failure',
+  error: 'danger',
+  cite: 'quote',
+};
+
+const CALLOUT_TYPE_MAP: Record<string, { icon: string; color: string }> = {
+  ...CALLOUT_STYLES,
+  ...Object.fromEntries(Object.entries(CALLOUT_ALIASES).map(([alias, canonical]) => [alias, CALLOUT_STYLES[canonical]])),
 };
 const DEFAULT_CALLOUT = { icon: 'ℹ️', color: 'gray_bg' };
 

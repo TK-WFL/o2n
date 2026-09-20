@@ -64,11 +64,47 @@ describe('convertNote §6 変換表', () => {
     expect(result.markdown).toBe('<callout icon="💡" color="blue_bg">**タイトル**<br>本文行</callout>');
   });
 
-  it('callout(warning/tip/info/danger)のicon/colorが正しい', () => {
-    expect(convertNote('> [!warning] T\n> b', ctx()).markdown).toContain('icon="⚠️" color="orange_bg"');
-    expect(convertNote('> [!tip] T\n> b', ctx()).markdown).toContain('icon="💡" color="green_bg"');
-    expect(convertNote('> [!info] T\n> b', ctx()).markdown).toContain('icon="ℹ️" color="gray_bg"');
-    expect(convertNote('> [!danger] T\n> b', ctx()).markdown).toContain('icon="⛔" color="red_bg"');
+  it.each([
+    ['note', '💡', 'blue_bg'],
+    ['abstract', '📋', 'blue_bg'],
+    ['summary', '📋', 'blue_bg'],
+    ['tldr', '📋', 'blue_bg'],
+    ['info', 'ℹ️', 'gray_bg'],
+    ['todo', '☑️', 'blue_bg'],
+    ['tip', '🔥', 'green_bg'],
+    ['hint', '🔥', 'green_bg'],
+    ['important', '🔥', 'green_bg'],
+    ['success', '✅', 'green_bg'],
+    ['check', '✅', 'green_bg'],
+    ['done', '✅', 'green_bg'],
+    ['question', '❓', 'yellow_bg'],
+    ['help', '❓', 'yellow_bg'],
+    ['faq', '❓', 'yellow_bg'],
+    ['warning', '⚠️', 'orange_bg'],
+    ['caution', '⚠️', 'orange_bg'],
+    ['attention', '⚠️', 'orange_bg'],
+    ['failure', '❌', 'red_bg'],
+    ['fail', '❌', 'red_bg'],
+    ['missing', '❌', 'red_bg'],
+    ['danger', '⚡', 'red_bg'],
+    ['error', '⚡', 'red_bg'],
+    ['bug', '🐛', 'red_bg'],
+    ['example', '📝', 'purple_bg'],
+    ['quote', '💬', 'gray_bg'],
+    ['cite', '💬', 'gray_bg'],
+  ])('callout(%s) は Obsidian 公式の全種別・別名に対応し、downgraded にならない', (type, icon, color) => {
+    const result = convertNote(`> [!${type}] T\n> b`, ctx());
+    expect(result.markdown).toContain(`icon="${icon}" color="${color}"`);
+    expect(result.entries.some((e) => e.message.includes('未知のcallout種別'))).toBe(false);
+  });
+
+  it('callout 種別は大文字小文字を区別しない', () => {
+    expect(convertNote('> [!WARNING] T\n> b', ctx()).markdown).toContain('icon="⚠️" color="orange_bg"');
+    expect(convertNote('> [!Tip] T\n> b', ctx()).markdown).toContain('icon="🔥" color="green_bg"');
+  });
+
+  it('タイトル省略時は種別名（先頭大文字）がタイトルになる', () => {
+    expect(convertNote('> [!faq]\n> b', ctx()).markdown).toContain('**Faq**<br>b');
   });
 
   it('未知のcallout種別はデフォルト(ℹ️/gray)に変換されレポートされる', () => {
