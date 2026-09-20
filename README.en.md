@@ -92,6 +92,8 @@ vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
 - Highlights (`==text==`, including Obsidian 1.14 color highlights such as `==🔴text==`) → native Notion highlight with the matching color
 - Math (`$...$` / `$$...$$`) and mermaid code blocks → passed through as-is
 - Headings up to h4 (Notion's limit); h5/h6 are downgraded to h4 and recorded in the report
+- Tasks (`- [ ]` / `- [x]`) → Notion to-dos. Extended states such as `[/]` or `[-]` are normalized to unchecked with the original marker kept in the text (recorded in the report)
+- Inline code (`` `...` ``) and code blocks are left untouched
 - Unsupported elements are recorded in the report: Canvas (`.canvas`), Bases (`.base`), Dataview query results, transclusion, etc. Excalidraw drawing notes are migrated as their exported image (`.png`/`.svg` with the same name) when one exists, otherwise skipped
 
 For each folder, if 60%+ of its direct notes share 3 or more common frontmatter keys, database mode

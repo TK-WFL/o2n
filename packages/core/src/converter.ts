@@ -120,6 +120,48 @@ function splitCodeFences(content: string): Segment[] {
   return segments;
 }
 
+const INLINE_CODE_SENTINEL_PREFIX = '⟦o2n-code-';
+
+/**
+ * インラインコード（`` `x` `` および `` ``x`` ``）を番兵に置き換え、復元関数を返す。
+ * 番兵はリンク/添付プレースホルダーと同じ `⟦o2n-` 接頭辞を使う（本文中の同接頭辞は
+ * convertNote 冒頭で退避済みなので衝突しない）。正規表現はバッククォートと非バッククォートの
+ * 文字集合が排他なので線形時間で走る。
+ */
+function protectInlineCode(text: string): { text: string; restore: (t: string) => string } {
+  const spans: string[] = [];
+  const stash = (m: string): string => {
+    spans.push(m);
+    return `${INLINE_CODE_SENTINEL_PREFIX}${spans.length - 1}⟧`;
+  };
+  let out = text.replace(/``[^`\n]+(?:`[^`\n]+)*``/g, stash);
+  out = out.replace(/`[^`\n]+`/g, stash);
+  const restore = (t: string): string =>
+    spans.length === 0 ? t : t.replace(/⟦o2n-code-(\d+)⟧/g, (_m, i: string) => spans[Number(i)] ?? _m);
+  return { text: out, restore };
+}
+
+/**
+ * タスクの拡張状態（`- [/]` `- [-]` `- [>]` 等、テーマ/プラグイン由来）は Notion では `[ ]`/`[x]` 以外
+ * 認識されず、`[/] text` という文字列を含む箇条書きになる（実ワークスペースで確認、docs/questions.md §19）。
+ * `[X]` は `[x]` に、それ以外は未完了 `[ ]` に正規化し、元の記号を `(記号)` として本文先頭に残す（#79）。
+ */
+function normalizeTaskStates(text: string, entries: ReportEntry[], sourcePath: string): string {
+  let count = 0;
+  const out = text.replace(/^(\s*(?:[-*+]|\d+[.)])\s+)\[([^\s\]xX])\](?=\s)/gm, (_m, prefix: string, mark: string) => {
+    count += 1;
+    return `${prefix}[ ] (${mark})`;
+  }).replace(/^(\s*(?:[-*+]|\d+[.)])\s+)\[X\](?=\s)/gm, '$1[x]');
+  if (count > 0) {
+    entries.push({
+      category: 'downgraded',
+      path: sourcePath,
+      message: `タスクの拡張状態（[/] [-] 等）${count}箇所は Notion で認識されないため未完了 [ ] に正規化し、元の記号を本文先頭に残しました`,
+    });
+  }
+  return out;
+}
+
 /**
  * Notion の見出しは h4（`####`、2026-03-30 追加）まで。Obsidian の h5/h6 は Notion の enhanced markdown
  * パーサが自動的に heading_4 として保存する（実ワークスペースで確認、docs/questions.md §19）ため
@@ -427,15 +469,19 @@ export function convertNote(content: string, ctx: ConverterContext): ConvertNote
       }
       return seg.content; // mermaid含め、コードブロックは常にそのまま保持
     }
-    let t = seg.content;
+    // インラインコード（`...`）の中身は変換対象外（docs/questions.md §7、#79）。
+    // 先に退避して各変換を通した後で戻す。fenced code block と同じ扱い。
+    const { text: withoutInlineCode, restore } = protectInlineCode(seg.content);
+    let t = withoutInlineCode;
     t = normalizeHeadingDepth(t, entries, ctx.sourcePath);
+    t = normalizeTaskStates(t, entries, ctx.sourcePath);
     t = convertCallouts(t, entries, ctx.sourcePath);
     t = convertWikiLinks(t, ctx, entries, pendingLinks, pendingFiles);
     t = convertMarkdownLinksAndImages(t, ctx, entries, pendingLinks, pendingFiles);
     t = convertHighlights(t);
     t = stripComments(t, entries, ctx.sourcePath);
     t = expandFootnotes(t, entries, ctx.sourcePath);
-    return t;
+    return restore(t);
   });
 
   return {
