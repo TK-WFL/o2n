@@ -44,6 +44,12 @@ export interface NoteRecord {
   content: string;
   /** ファイルサイズ（バイト） */
   sizeBytes: number;
+  /**
+   * Excalidraw プラグインの図面ノート（frontmatter `excalidraw-plugin`）。図面本体は JSON で
+   * 変換できないため、同名の書き出し画像（.png/.svg）があれば content をその埋め込みに
+   * 置き換えている。Pass1 でレポートするための印（#78）。
+   */
+  excalidraw?: { exportedImage: string };
 }
 
 export interface SkippedFile {

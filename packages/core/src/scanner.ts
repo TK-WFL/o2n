@@ -19,7 +19,13 @@ const ATTACHMENT_EXTENSIONS = new Set([
   'mp4', 'mov', 'webm', 'mkv',
 ]);
 
-const NON_CONVERTIBLE_EXTENSIONS = new Set(['canvas']);
+/** 変換対象外の Obsidian 固有ファイル形式と、レポートに出す理由 */
+const NON_CONVERTIBLE_EXTENSIONS: Record<string, string> = {
+  canvas: '非対応ファイル形式 (.canvas) はv1では変換されません',
+  base: 'Obsidian Bases (.base) は変換されません（ビューの定義ファイルで、Notionのデータベースビューへの対応付けは非対象）',
+};
+/** Excalidraw の書き出し画像として探す拡張子（優先順） */
+const EXCALIDRAW_EXPORT_EXTENSIONS = ['png', 'svg'];
 const ALLOWED_FRONTMATTER_LANGUAGES = new Set(['', 'yaml', 'yml']);
 
 export class UnsupportedFrontmatterLanguageError extends Error {
@@ -245,11 +251,11 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
   const folderTree: Record<string, string[]> = {};
   const frontmatterKeyStats: Record<string, number> = {};
 
+  const allFileSet = new Set(allFiles);
   for (const relPath of allFiles) {
     const ext = relPath.split('.').pop()?.toLowerCase() ?? '';
-    if (NON_CONVERTIBLE_EXTENSIONS.has(ext)) {
-      skipped.push({ path: relPath, reason: `非対応ファイル形式 (.${ext}) はv1では変換されません` });
-    }
+    const reason = NON_CONVERTIBLE_EXTENSIONS[ext];
+    if (reason) skipped.push({ path: relPath, reason });
   }
 
   for (const relPath of mdPaths) {
@@ -257,15 +263,36 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
     const raw = await fs.readFile(absPath, 'utf-8');
     const stat = await fs.stat(absPath);
     const parsed = parseNoteMatter(raw, relPath);
+    const frontmatter = parsed.data ?? {};
+
+    let content = parsed.content;
+    let excalidraw: NoteRecord['excalidraw'];
+    if (frontmatter['excalidraw-plugin'] !== undefined) {
+      // Excalidraw の図面ノート。本文は図面 JSON（コードブロック）で Notion では意味を成さない。
+      // プラグインが同名で書き出す画像（Drawing.excalidraw.png 等）があれば、それを埋め込む
+      // ノートに置き換える。無ければ変換対象から外してレポートする。
+      const noExt = relPath.replace(/\.md$/, '');
+      const exportedImage = EXCALIDRAW_EXPORT_EXTENSIONS.map((e) => `${noExt}.${e}`).find((p) => allFileSet.has(p));
+      if (!exportedImage) {
+        skipped.push({
+          path: relPath,
+          reason: 'Excalidraw の図面ノートは変換されません（同名の .png/.svg 書き出しが見つからないため。Obsidian で「Export as PNG/SVG」して再実行すると画像として移行できます）',
+        });
+        continue;
+      }
+      content = `![[${path.posix.basename(exportedImage)}]]\n`;
+      excalidraw = { exportedImage };
+    }
 
     notes.push({
       path: relPath,
-      frontmatter: parsed.data ?? {},
-      content: parsed.content,
+      frontmatter,
+      content,
       sizeBytes: stat.size,
+      ...(excalidraw ? { excalidraw } : {}),
     });
 
-    for (const key of Object.keys(parsed.data ?? {})) {
+    for (const key of Object.keys(frontmatter)) {
       frontmatterKeyStats[key] = (frontmatterKeyStats[key] ?? 0) + 1;
     }
 
@@ -274,7 +301,7 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
     folderTree[dirKey] = folderTree[dirKey] ?? [];
     folderTree[dirKey].push(relPath);
 
-    for (const link of parseWikiLinks(parsed.content)) {
+    for (const link of parseWikiLinks(content)) {
       const linkExt = link.target.includes('.')
         ? link.target.split('.').pop()!.toLowerCase()
         : '';
