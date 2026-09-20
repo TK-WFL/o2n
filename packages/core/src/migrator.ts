@@ -202,7 +202,9 @@ async function runPass1(
       parent = { page_id: container.id };
     }
 
-    const chunks = splitMarkdownForPayload(markdown);
+    const chunks = splitMarkdownForPayload(markdown, {
+      onOversizedUnit: (message) => report.push({ category: 'warning', path: note.path, message }),
+    });
 
     try {
       if (dryRun) {
