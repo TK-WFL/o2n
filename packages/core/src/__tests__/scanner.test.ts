@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
-import { scanVault, UnsupportedFrontmatterLanguageError } from '../scanner.js';
+import { buildAliasIndex, buildNameIndex, resolveNoteLink, scanVault, UnsupportedFrontmatterLanguageError } from '../scanner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VAULT = path.resolve(__dirname, '../../../../fixtures/test-vault');
@@ -159,5 +159,50 @@ describe('wikilink抽出のReDoS耐性（セキュリティ回帰テスト）', 
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('frontmatter aliases によるリンク解決（#77）', () => {
+  const notes = [
+    { path: 'Projects/Alpha.md', frontmatter: { aliases: ['α計画', 'Alpha Project'] } },
+    { path: 'Beta.md', frontmatter: { aliases: 'ベータ' } },
+    { path: 'Old.md', frontmatter: { alias: '旧形式' } },
+    { path: 'Docs/Gamma.md', frontmatter: { aliases: ['共通'] } },
+    { path: 'Sub/Delta.md', frontmatter: { aliases: ['共通', 42, null, ''] } },
+    { path: 'Alpha Project.md', frontmatter: {} },
+  ];
+  const nameIndex = buildNameIndex(notes.map((n) => n.path));
+  const aliasIndex = buildAliasIndex(notes);
+
+  it('配列・文字列・旧形式 alias・数値を索引化し、空文字/null は無視する', () => {
+    expect(aliasIndex.get('α計画')).toEqual(['Projects/Alpha.md']);
+    expect(aliasIndex.get('ベータ')).toEqual(['Beta.md']);
+    expect(aliasIndex.get('旧形式')).toEqual(['Old.md']);
+    expect(aliasIndex.get('42')).toEqual(['Sub/Delta.md']);
+    expect(aliasIndex.has('')).toBe(false);
+  });
+
+  it('[[別名]] が aliases を持つノートに解決される', () => {
+    expect(resolveNoteLink('α計画', 'Home.md', nameIndex, aliasIndex).resolved).toBe('Projects/Alpha.md');
+    expect(resolveNoteLink('ベータ', 'Home.md', nameIndex, aliasIndex).resolved).toBe('Beta.md');
+  });
+
+  it('ファイル名一致が alias 一致より優先される', () => {
+    // "Alpha Project" はファイル名としても Alpha.md の alias としても存在する
+    expect(resolveNoteLink('Alpha Project', 'Home.md', nameIndex, aliasIndex).resolved).toBe('Alpha Project.md');
+  });
+
+  it('alias が複数ノートで衝突する場合はパス近接で選び、なお曖昧なら警告する', () => {
+    const near = resolveNoteLink('共通', 'Sub/Other.md', nameIndex, aliasIndex);
+    expect(near.resolved).toBe('Sub/Delta.md');
+    expect(near.warning).toBeUndefined();
+    const far = resolveNoteLink('共通', 'X/Y.md', nameIndex, aliasIndex);
+    expect(far.warning?.reason).toBe('ambiguous');
+  });
+
+  it('どちらにも無ければ not_found', () => {
+    const r = resolveNoteLink('存在しない', 'Home.md', nameIndex, aliasIndex);
+    expect(r.resolved).toBeNull();
+    expect(r.warning?.reason).toBe('not_found');
   });
 });

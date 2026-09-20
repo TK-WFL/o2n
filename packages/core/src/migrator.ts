@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { buildNameIndex, resolveByFilename } from './scanner.js';
+import { buildAliasIndex, buildNameIndex, resolveByFilename, resolveNoteLink } from './scanner.js';
 import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext } from './converter.js';
 import { NotionApiError, type NotionApi, type NotionBlock, type UpdateContentItem } from './notion-client.js';
 import type { StateStore } from './state.js';
@@ -52,17 +52,39 @@ function folderDepth(folderPath: string): number {
   return folderPath === '' ? 0 : folderPath.split('/').length;
 }
 
+interface ResolverIndexes {
+  noteIndex: Map<string, string[]>;
+  aliasIndex: Map<string, string[]>;
+  fileIndex: Map<string, string[]>;
+}
+
+// 索引は inventory ごとに一度だけ作る（buildResolvers は各パスでノートごとに呼ばれる）
+const resolverIndexCache = new WeakMap<VaultInventory, ResolverIndexes>();
+
+function indexesFor(inventory: VaultInventory): ResolverIndexes {
+  let idx = resolverIndexCache.get(inventory);
+  if (!idx) {
+    idx = {
+      noteIndex: buildNameIndex(inventory.notes.map((n) => n.path)),
+      aliasIndex: buildAliasIndex(inventory.notes),
+      fileIndex: buildNameIndex(
+        // 添付は vault 内の非.mdファイル全体から解決（wikiLinks抽出時と同じロジック）
+        inventory.attachments
+          .map((a) => a.targetPath)
+          .filter((p): p is string => p !== null),
+      ),
+    };
+    resolverIndexCache.set(inventory, idx);
+  }
+  return idx;
+}
+
 function buildResolvers(inventory: VaultInventory, sourcePath: string): ConverterContext {
-  const noteIndex = buildNameIndex(inventory.notes.map((n) => n.path));
-  const fileIndex = buildNameIndex(
-    // 添付は vault 内の非.mdファイル全体から解決（wikiLinks抽出時と同じロジック）
-    inventory.attachments
-      .map((a) => a.targetPath)
-      .filter((p): p is string => p !== null),
-  );
+  const { noteIndex, aliasIndex, fileIndex } = indexesFor(inventory);
   return {
     sourcePath,
-    resolveNoteLink: (target: string) => resolveByFilename(target, sourcePath, noteIndex).resolved,
+    // ファイル名一致 → frontmatter aliases の順で解決（Obsidian の挙動、#77）
+    resolveNoteLink: (target: string) => resolveNoteLink(target, sourcePath, noteIndex, aliasIndex).resolved,
     resolveAttachment: (target: string) => resolveByFilename(target, sourcePath, fileIndex).resolved,
   };
 }
