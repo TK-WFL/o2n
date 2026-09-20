@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildAliasIndex, buildNameIndex, resolveByFilename, resolveNoteLink } from './scanner.js';
 import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext } from './converter.js';
-import { NotionApiError, type NotionApi, type NotionBlock, type UpdateContentItem } from './notion-client.js';
+import { NotionApiError, NotionBlockLimitError, type NotionApi, type NotionBlock, type UpdateContentItem } from './notion-client.js';
 import type { StateStore } from './state.js';
 import { contentHash, isNoteUpToDate } from './state.js';
 import { createDatabaseForFolder, buildRowProperties } from './notion-db.js';
@@ -163,6 +163,8 @@ async function createFolderContainers(
         await state.setFolder(folder.folderPath, { status: 'created', kind: 'page', notionId: page.id });
       }
     } catch (err) {
+      // ブロック上限は個別の失敗ではなく移行全体の中断。state は触らず（未作成のまま）呼び出し元で中断する
+      if (err instanceof NotionBlockLimitError) throw err;
       await state.setFolder(folder.folderPath, {
         status: 'failed',
         kind: folder.mode === 'database' ? 'database' : 'page',
@@ -277,6 +279,10 @@ async function runPass1(
       }
       await state.setNote(note.path, { status: 'created', pageId: page.id, pageUrl: page.url, contentHash: hash });
     } catch (err) {
+      // ブロック上限（#70）: 残りのノートも全て同じ理由で失敗するので、1ノートごとに無駄な
+      // リクエストを送らず即座に中断する。このノートの state は未着手のまま残すため、
+      // プラン変更後に resume すればここから続きを処理できる。
+      if (err instanceof NotionBlockLimitError) throw err;
       await state.setNote(note.path, { status: 'failed', contentHash: hash, error: String(err) });
       report.push({ category: 'warning', path: note.path, message: `ページ作成に失敗: ${String(err)}` });
     }
@@ -606,11 +612,24 @@ export async function runMigration(opts: MigratorOptions): Promise<ReportEntry[]
     });
   }
 
-  const containers = await createFolderContainers(opts, report);
-  await runPass1(opts, containers, report);
+  try {
+    const containers = await createFolderContainers(opts, report);
+    await runPass1(opts, containers, report);
+  } catch (err) {
+    if (!(err instanceof NotionBlockLimitError)) throw err;
+    // Pass2（リンク解決）は既存ページの本文更新なので続行できるが、Pass3（添付ブロック挿入）は
+    // ブロック作成のため同じ上限に当たる。中断として報告し、resume で再開できる状態で返す
+    report.push({ category: 'aborted', path: '', message: err.message });
+    return report;
+  }
   await runPass2(opts, report);
   await runPass3(opts, report);
   return report;
+}
+
+/** 移行がブロック上限で中断されたか（CLI/MCP が終了コードやメッセージを出し分けるため） */
+export function wasAbortedByBlockLimit(entries: ReportEntry[]): boolean {
+  return entries.some((e) => e.category === 'aborted');
 }
 
 export function noteRecordByPath(notes: NoteRecord[], p: string): NoteRecord | undefined {

@@ -31,3 +31,27 @@ describe('planner DB化自動提案', () => {
     expect(mappings?.some((m) => m.key === 'due' && m.notionPropertyType === 'date')).toBe(true);
   });
 });
+
+describe('推定ブロック数と Free プラン上限の事前警告（#70）', () => {
+  it('非空行＋frontmatter callout＋添付＋フォルダを数える', async () => {
+    const { estimateBlockCount, blockLimitWarning, FREE_PLAN_BLOCK_LIMIT } = await import('../planner.js');
+    const inventory = {
+      vaultPath: '/v',
+      notes: [
+        { path: 'A.md', frontmatter: { t: 1 }, content: '# A\n\n- x\n- y\n\n\n', sizeBytes: 1 },
+        { path: 'Sub/B.md', frontmatter: {}, content: 'p', sizeBytes: 1 },
+      ],
+      attachments: [{ sourcePath: 'A.md', targetPath: 'i.png', raw: '![[i.png]]', extension: 'png' }],
+      wikiLinks: [],
+      skipped: [],
+      warnings: [],
+      folderTree: { '': ['A.md'], Sub: ['Sub/B.md'] },
+      frontmatterKeyStats: {},
+    };
+    // A: 3行 + callout 1、B: 1行、添付 1、フォルダ Sub 1 = 7
+    expect(estimateBlockCount(inventory)).toBe(7);
+    expect(blockLimitWarning(7)).toBeNull();
+    expect(blockLimitWarning(FREE_PLAN_BLOCK_LIMIT)).toBeNull();
+    expect(blockLimitWarning(FREE_PLAN_BLOCK_LIMIT + 1)).toContain('1,000');
+  });
+});

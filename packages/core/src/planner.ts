@@ -70,3 +70,37 @@ export function buildPlan(inventory: VaultInventory, opts: PlannerOptions): Migr
     skipList: opts.skipList ?? inventory.skipped.map((s) => s.path),
   };
 }
+
+/** Notion Free プラン（複数メンバー）の生涯ブロック上限。https://developers.notion.com/reference/workspace-block-limits */
+export const FREE_PLAN_BLOCK_LIMIT = 1000;
+
+/**
+ * 移行で作成される Notion ブロック数の概算。段落・リスト項目・見出し等はおおむね1行1ブロック、
+ * 添付は1ブロック、フォルダページ/DBは1ブロックとして数える（コードブロックや表は行数分だけ
+ * 多めに見積もられる。Free プランのブロック上限に当たるかどうかの事前警告に使う目的なので、
+ * 少なめに出るより多めに出る方向に倒している）。
+ */
+export function estimateBlockCount(inventory: VaultInventory): number {
+  let blocks = 0;
+  for (const note of inventory.notes) {
+    for (const line of note.content.split('\n')) {
+      if (line.trim() !== '') blocks += 1;
+    }
+    // frontmatter のメタ callout（page_tree モード）
+    if (Object.keys(note.frontmatter).length > 0) blocks += 1;
+  }
+  blocks += inventory.attachments.length;
+  blocks += Object.keys(inventory.folderTree).filter((f) => f !== '').length;
+  return blocks;
+}
+
+/** 推定ブロック数が Free プランの上限を超えるときの事前警告文（超えなければ null） */
+export function blockLimitWarning(estimatedBlocks: number): string | null {
+  if (estimatedBlocks <= FREE_PLAN_BLOCK_LIMIT) return null;
+  return (
+    `推定ブロック数 ${estimatedBlocks.toLocaleString()} は Notion Free プラン（複数メンバー）の生涯上限 ` +
+    `${FREE_PLAN_BLOCK_LIMIT.toLocaleString()} ブロックを超えています。移行先が Free プランで複数メンバーの場合、` +
+    '上限到達時点で移行は中断されます（削除しても枠は戻りません）。有料プランへのアップグレード、' +
+    'メンバーを1人にする、または個人アクセストークン（PAT。上限の対象外）の利用を検討してください。'
+  );
+}

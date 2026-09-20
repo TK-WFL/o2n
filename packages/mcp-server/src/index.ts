@@ -20,6 +20,9 @@ import {
   parseStateFile,
   planHash,
   type StateFile,
+  blockLimitWarning,
+  estimateBlockCount,
+  wasAbortedByBlockLimit,
 } from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
 import { getJob, setJob } from './jobs.js';
@@ -92,6 +95,8 @@ server.tool(
       wikiLinkCount: inventory.wikiLinks.length,
       skippedCount: inventory.skipped.length,
       warningCount: inventory.warnings.length,
+      estimatedBlocks: estimateBlockCount(inventory),
+      blockLimitWarning: blockLimitWarning(estimateBlockCount(inventory)),
       folders: Object.fromEntries(Object.entries(inventory.folderTree).map(([k, v]) => [k || '(root)', v.length])),
       frontmatterKeyStats: inventory.frontmatterKeyStats,
     };
@@ -187,6 +192,8 @@ server.tool(
           dryRun: request.dryRun,
           noteCount: request.noteCount,
           attachmentCount: request.attachmentCount,
+          estimatedBlocks: estimateBlockCount(inventory),
+          blockLimitWarning: blockLimitWarning(estimateBlockCount(inventory)),
           planHash: request.planHash,
           commitInstructions: dryRun
             ? 'commit_migration に requestId を渡すとdry-runを開始します。'
@@ -238,6 +245,18 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
         });
         const report = buildReport(state.snapshot, entries);
         await writeReport(resolved, report, state.snapshot);
+        if (wasAbortedByBlockLimit(entries)) {
+          setJob(resolved, {
+            status: 'error',
+            done: getJob(resolved)?.done ?? 0,
+            total: inventory.notes.length,
+            currentPath: '',
+            error: entries.find((e) => e.category === 'aborted')?.message ?? '移行を中断しました',
+            startedAt: getJob(resolved)?.startedAt ?? Date.now(),
+            finishedAt: Date.now(),
+          });
+          return;
+        }
         setJob(resolved, {
           status: 'done',
           done: inventory.notes.length,

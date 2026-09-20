@@ -13,6 +13,7 @@ const CATEGORY_LABEL: Record<ReportEntry['category'], string> = {
   oversized_file: 'サイズ超過ファイル',
   downgraded: '降格変換',
   warning: '警告',
+  aborted: '中断',
 };
 
 export function buildReport(state: StateFile, entries: ReportEntry[]): MigrationReport {
