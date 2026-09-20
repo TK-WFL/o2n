@@ -73,6 +73,7 @@ npx @tk_wfl/o2n-cli scan <vaultPath>
 
 # 2. Generate a migration plan interactively (choose page-tree vs. database per folder)
 npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionPageId>
+#   add --embed-mode inline to expand ![[note]] embeds in place (default: downgrade to a link)
 
 # 3. Run the migration (--dry-run simulates without calling any write API)
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
@@ -93,7 +94,7 @@ Exit codes: `0` = fully succeeded, `1` = some notes failed, `2` = fatal error.
 ## MCP server usage
 
 Register `@tk_wfl/o2n-mcp-server` as a stdio MCP server in Claude Desktop / Claude Code.
-Tools: `scan_vault` / `get_plan` / `update_plan` / `prepare_migration` / `commit_migration` / `migration_status` / `verify_migration` / `get_report`.
+Tools: `scan_vault` / `get_plan` / `update_plan` (accepts `embedMode`) / `prepare_migration` / `commit_migration` / `migration_status` / `verify_migration` / `get_report`.
 
 MCP access requires `O2N_ALLOWED_VAULTS=/absolute/path/to/vault` (comma-separated for multiple
 vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
@@ -111,7 +112,8 @@ vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
 - Headings up to h4 (Notion's limit); h5/h6 are downgraded to h4 and recorded in the report
 - Tasks (`- [ ]` / `- [x]`) → Notion to-dos. Extended states such as `[/]` or `[-]` are normalized to unchecked with the original marker kept in the text (recorded in the report)
 - Inline code (`` `...` ``) and code blocks are left untouched
-- Unsupported elements are recorded in the report: Canvas (`.canvas`), Bases (`.base`), Dataview query results, transclusion, etc. Excalidraw drawing notes are migrated as their exported image (`.png`/`.svg` with the same name) when one exists, otherwise skipped
+- Note embeds (`![[note]]` / `![[note#heading]]`) → downgraded to a link by default. With `plan --embed-mode inline` the embedded note's body (or just that section) is expanded in place (an unsynced copy in Notion; cycles and depth > 2 fall back to a link)
+- Unsupported elements are recorded in the report: Canvas (`.canvas`), Bases (`.base`), Dataview query results, etc. Excalidraw drawing notes are migrated as their exported image (`.png`/`.svg` with the same name) when one exists, otherwise skipped
 
 For each folder, if 60%+ of its direct notes share 3 or more common frontmatter keys, database mode
 is suggested automatically (the final call is always made by the user via `plan`).

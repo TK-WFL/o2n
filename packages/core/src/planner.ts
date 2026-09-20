@@ -8,6 +8,8 @@ export interface PlannerOptions {
   /** database提案に必要な共通frontmatterキー数（デフォルト3） */
   dbSuggestionMinKeys?: number;
   skipList?: string[];
+  /** ノート埋め込みの扱い（#80）。省略時は plan に書かず 'link' 相当 */
+  embedMode?: 'link' | 'inline';
 }
 
 /**
@@ -68,6 +70,7 @@ export function buildPlan(inventory: VaultInventory, opts: PlannerOptions): Migr
     folders,
     frontmatterMappings,
     skipList: opts.skipList ?? inventory.skipped.map((s) => s.path),
+    ...(opts.embedMode ? { embedMode: opts.embedMode } : {}),
   };
 }
 

@@ -31,7 +31,7 @@ connected to that integration in Notion (page → `...` menu → Connections).
 
 ```bash
 npx @tk_wfl/o2n-cli scan <vaultPath>
-npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionPageId>
+npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionPageId>   # --embed-mode inline expands ![[note]] embeds in place
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
 npx @tk_wfl/o2n-cli resume <vaultPath>

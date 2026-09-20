@@ -370,6 +370,10 @@ describe('添付プレースホルダーの探索（#66）', () => {
     expect(state.getFile('Sub/pic.png')?.status).toBe('attached');
     // 子ブロック一覧の取得が親ブロックに対しても行われている
     expect(mock.calls.some((c) => c.method === 'GET' && /-parent\/children$/.test(c.path))).toBe(true);
+    // 添付ブロックはページではなく直接の親（リスト項目）に after_block で挿入される（実機で確認: ページ親だと 400）
+    const append = mock.calls.find((c) => c.method === 'PATCH' && /\/blocks\/.+\/children$/.test(c.path));
+    expect(append?.path).toMatch(/-parent\/children$/);
+    expect(JSON.stringify(append?.body)).toContain('-child-0');
     // 削除されたのは子側のプレースホルダーブロック
     expect(mock.calls.some((c) => c.method === 'DELETE' && /-child-0$/.test(c.path))).toBe(true);
   });

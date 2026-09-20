@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildAliasIndex, buildNameIndex, resolveByFilename, resolveNoteLink } from './scanner.js';
-import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext } from './converter.js';
+import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext, type EmbedMode } from './converter.js';
 import { NotionApiError, NotionBlockLimitError, type NotionApi, type NotionBlock, type UpdateContentItem } from './notion-client.js';
 import type { StateStore } from './state.js';
 import { contentHash, isNoteUpToDate } from './state.js';
@@ -79,14 +79,21 @@ function indexesFor(inventory: VaultInventory): ResolverIndexes {
   return idx;
 }
 
-function buildResolvers(inventory: VaultInventory, sourcePath: string): ConverterContext {
+function buildResolvers(inventory: VaultInventory, sourcePath: string, embedMode: EmbedMode = 'link'): ConverterContext {
   const { noteIndex, aliasIndex, fileIndex } = indexesFor(inventory);
-  return {
+  const ctx: ConverterContext = {
     sourcePath,
     // ファイル名一致 → frontmatter aliases の順で解決（Obsidian の挙動、#77）
     resolveNoteLink: (target: string) => resolveNoteLink(target, sourcePath, noteIndex, aliasIndex).resolved,
     resolveAttachment: (target: string) => resolveByFilename(target, sourcePath, fileIndex).resolved,
+    embedMode,
   };
+  if (embedMode === 'inline') {
+    // インライン展開（#80）: 埋め込み先の本文と、そのノートを起点にしたリンク解決を converter に渡す
+    ctx.readNote = (notePath: string) => inventory.notes.find((n) => n.path === notePath)?.content ?? null;
+    ctx.contextFor = (notePath: string) => buildResolvers(inventory, notePath, embedMode);
+  }
+  return ctx;
 }
 
 /**
@@ -206,7 +213,7 @@ async function runPass1(
     const folder = folderOf(note.path);
     const container = containers.get(folder) ?? { kind: 'page' as const, id: plan.parentPageId };
 
-    const ctx = buildResolvers(inventory, note.path);
+    const ctx = buildResolvers(inventory, note.path, plan.embedMode);
     const converted = convertNote(note.content, ctx);
     report.push(...converted.entries);
     if (note.excalidraw) {
@@ -293,13 +300,13 @@ async function runPass1(
 }
 
 async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
-  const { inventory, state, api, dryRun } = opts;
+  const { plan, inventory, state, api, dryRun } = opts;
 
   for (const note of inventory.notes) {
     const noteState = state.getNote(note.path);
     if (!noteState || noteState.status !== 'created' || !noteState.pageId) continue;
 
-    const ctx = buildResolvers(inventory, note.path);
+    const ctx = buildResolvers(inventory, note.path, plan.embedMode);
     const reconverted = convertNote(note.content, ctx);
 
     const updates: UpdateContentItem[] = [];
@@ -435,8 +442,17 @@ async function uploadFile(
   return created.id;
 }
 
+interface PlaceholderLocation {
+  blockId: string;
+  /** プレースホルダーブロックの直接の親（ページ本体ならページID）。after_block で挿入する際の親に使う */
+  parentId: string;
+}
+
 /**
- * ページ内から添付プレースホルダーを含むブロックを探し、placeholder → blockId の対応を返す。
+ * ページ内から添付プレースホルダーを含むブロックを探し、placeholder → { blockId, parentId } の対応を返す。
+ * 実ワークスペースで確認（2026-09-20、#82）: ネストしたリスト項目内のプレースホルダーの直後に挿入するには
+ * `PATCH /blocks/{直接の親}/children` に after_block を渡す必要があり、ページIDを親にすると
+ * 400 "Block ID … to append children after is not parented by …" になる。
  * - 子ブロック一覧はページネーションで全件取得する（100ブロック超対応）
  * - ネストしたリスト項目など `has_children` のブロックは再帰して探す（深さ上限 maxDepth）。
  *   ただし子ページ/子DBの中には入らない
@@ -447,8 +463,8 @@ async function findPlaceholderBlocks(
   pageId: string,
   wanted: Set<string>,
   maxDepth = 3,
-): Promise<Map<string, string>> {
-  const found = new Map<string, string>();
+): Promise<Map<string, PlaceholderLocation>> {
+  const found = new Map<string, PlaceholderLocation>();
   const remaining = new Set(wanted);
 
   async function search(blockId: string, depth: number): Promise<void> {
@@ -460,7 +476,7 @@ async function findPlaceholderBlocks(
       const json = JSON.stringify(block);
       for (const ph of remaining) {
         if (json.includes(ph)) {
-          found.set(ph, block.id);
+          found.set(ph, { blockId: block.id, parentId: blockId });
           remaining.delete(ph);
         }
       }
@@ -479,7 +495,7 @@ async function findPlaceholderBlocks(
 }
 
 async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
-  const { inventory, state, api, dryRun, vaultPath } = opts;
+  const { plan, inventory, state, api, dryRun, vaultPath } = opts;
 
   let wsLimit = Infinity;
   if (!dryRun) {
@@ -497,7 +513,7 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
     // （一度'done'になったノートをPass3が二度と見に行かないと、失敗した添付が永遠に直らない）
     if (!noteState || !noteState.pageId || (noteState.status !== 'linked' && noteState.status !== 'done')) continue;
 
-    const ctx = buildResolvers(inventory, note.path);
+    const ctx = buildResolvers(inventory, note.path, plan.embedMode);
     const reconverted = convertNote(note.content, ctx);
 
     if (reconverted.pendingFiles.length === 0) {
@@ -515,7 +531,7 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       if (state.getFile(file.targetPath)?.status === 'skipped') continue;
       lookupTargets.add(file.placeholder);
     }
-    let placeholderBlocks = new Map<string, string>();
+    let placeholderBlocks = new Map<string, PlaceholderLocation>();
     if (!dryRun && lookupTargets.size > 0) {
       try {
         placeholderBlocks = await findPlaceholderBlocks(api, noteState.pageId, lookupTargets);
@@ -568,8 +584,8 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       }
 
       try {
-        const placeholderBlockId = placeholderBlocks.get(file.placeholder);
-        if (!placeholderBlockId) {
+        const location = placeholderBlocks.get(file.placeholder);
+        if (!location) {
           // この修正より前に作られたstate.json（attachedPlaceholders未記録）は、
           // 過去の実行で正常に貼り付け済みでも記録が残っていない。ファイル自体が
           // 既に'attached'なら「見つからない」のは過去の正常完了である可能性が高いため、
@@ -583,8 +599,8 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
           continue;
         }
         const ext = file.targetPath.split('.').pop() ?? '';
-        await api.appendBlockChildren(noteState.pageId, [buildAttachmentBlock(fileUploadId!, ext)], placeholderBlockId);
-        await api.deleteBlock(placeholderBlockId);
+        await api.appendBlockChildren(location.parentId, [buildAttachmentBlock(fileUploadId!, ext)], location.blockId);
+        await api.deleteBlock(location.blockId);
         await state.setFile(file.targetPath, { status: 'attached', fileUploadId });
         attachedPlaceholders.add(file.placeholder);
         await state.setNote(note.path, { ...state.getNote(note.path)!, attachedPlaceholders: [...attachedPlaceholders] });

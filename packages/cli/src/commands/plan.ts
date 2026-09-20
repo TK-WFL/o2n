@@ -15,6 +15,8 @@ export interface PlanCommandOptions {
   out?: string;
   parent?: string;
   yes?: boolean;
+  /** ノート埋め込みの扱い（#80）。省略時は plan に書かず link 相当 */
+  embedMode?: 'link' | 'inline';
 }
 
 export async function planCommand(vaultPath: string, opts: PlanCommandOptions): Promise<string> {
@@ -41,7 +43,7 @@ export async function planCommand(vaultPath: string, opts: PlanCommandOptions): 
     }
   }
 
-  const plan = buildPlan(inventory, { parentPageId });
+  const plan = buildPlan(inventory, { parentPageId, embedMode: opts.embedMode });
   plan.folders = finalFolders;
   // page_treeへ変更されたフォルダのfrontmatterMappingsは不要なので除去
   for (const folder of finalFolders) {

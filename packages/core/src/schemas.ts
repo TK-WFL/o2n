@@ -19,6 +19,7 @@ export const migrationPlanSchema = z.object({
   folders: z.array(folderPlanSchema),
   frontmatterMappings: z.record(z.string(), z.array(frontmatterMappingSchema)),
   skipList: z.array(z.string()),
+  embedMode: z.enum(['link', 'inline']).optional(),
 }) satisfies z.ZodType<MigrationPlan>;
 
 const noteStateSchema = z.object({

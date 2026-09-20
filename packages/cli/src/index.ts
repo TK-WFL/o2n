@@ -54,8 +54,14 @@ program
   .option('--out <path>', '計画ファイルの出力先')
   .option('--parent <pageId>', '移行先のNotion親ページID')
   .option('--yes', 'DB化提案をすべて自動承認する')
-  .action(async (vaultPath: string, opts: { out?: string; parent?: string; yes?: boolean }) => {
-    await planCommand(vaultPath, opts);
+  .option('--embed-mode <mode>', 'ノート埋め込み ![[Note]] の扱い: link（既定、リンクに降格）| inline（本文をその場に展開）')
+  .action(async (vaultPath: string, opts: { out?: string; parent?: string; yes?: boolean; embedMode?: string }) => {
+    if (opts.embedMode !== undefined && opts.embedMode !== 'link' && opts.embedMode !== 'inline') {
+      console.error(`--embed-mode は link または inline を指定してください（指定値: ${opts.embedMode}）`);
+      process.exitCode = 2;
+      return;
+    }
+    await planCommand(vaultPath, { ...opts, embedMode: opts.embedMode as 'link' | 'inline' | undefined });
   });
 
 program

@@ -73,6 +73,7 @@ npx @tk_wfl/o2n-cli scan <vaultPath>
 
 # 2. 移行計画を対話式に生成（フォルダごとにページ階層/データベース化を選べる）
 npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionページID>
+#   --embed-mode inline を付けると ![[ノート]] の埋め込みを本文にインライン展開する（既定はリンクに降格）
 
 # 3. 移行実行（--dry-run でシミュレーションのみ、書き込みAPIを呼ばない）
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
@@ -93,7 +94,7 @@ npx @tk_wfl/o2n-cli report <vaultPath>
 ## 使い方（MCPサーバー）
 
 Claude Desktop / Claude Code から `@tk_wfl/o2n-mcp-server` を stdio MCP サーバーとして登録する。
-ツール: `scan_vault` / `get_plan` / `update_plan` / `prepare_migration` / `commit_migration` / `migration_status` / `verify_migration` / `get_report`。
+ツール: `scan_vault` / `get_plan` / `update_plan`（`embedMode` も指定可）/ `prepare_migration` / `commit_migration` / `migration_status` / `verify_migration` / `get_report`。
 
 MCPからvaultへアクセスするには、`O2N_ALLOWED_VAULTS=/absolute/path/to/vault` のように許可vaultを
 カンマ区切りで明示する。Notionへの本実行は既定で無効で、`O2N_ENABLE_MCP_WRITE=1` と
@@ -111,7 +112,8 @@ MCPからvaultへアクセスするには、`O2N_ALLOWED_VAULTS=/absolute/path/t
 - 見出しは h4 まで（Notionの上限）。h5/h6 は h4 に降格しレポートに記録される
 - タスク（`- [ ]` / `- [x]`）→ NotionのTo-do。`[/]` `[-]` などの拡張状態は未完了に正規化し元の記号を本文に残す（レポートに記録）
 - インラインコード（`` `...` ``）とコードブロックの中身は変換しない
-- 対応していない要素はレポートに記録される: Canvas（`.canvas`）、Bases（`.base`）、Dataviewの実行結果、トランスクルージョン等。Excalidrawの図面ノートは同名の書き出し画像（`.png`/`.svg`）があればその画像として移行し、無ければスキップ
+- ノート埋め込み（`![[ノート]]` / `![[ノート#見出し]]`）→ 既定ではリンクに降格。`plan --embed-mode inline` で埋め込み先の本文（見出し指定ならそのセクション）をその場に展開する（Notion上では同期されない複製。循環と深さ3以上はリンクに降格）
+- 対応していない要素はレポートに記録される: Canvas（`.canvas`）、Bases（`.base`）、Dataviewの実行結果等。Excalidrawの図面ノートは同名の書き出し画像（`.png`/`.svg`）があればその画像として移行し、無ければスキップ
 
 フォルダごとに、直下ノートの60%以上が共通のfrontmatterキーを3つ以上持つ場合はデータベース化を自動提案する
 （最終判断は`plan`コマンドでユーザーが行う）。
