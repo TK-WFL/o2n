@@ -266,6 +266,14 @@ export class NotionApi {
   }
 
   /**
+   * マルチパート（mode: 'multi_part'）は全パート送信後にこのAPIを呼ばないと
+   * 完了しない（公式ガイド "Sending larger files"）。single_partでは不要。
+   */
+  async completeFileUpload(fileUploadId: string): Promise<{ id: string; status: string }> {
+    return this.client.request({ method: 'POST', path: `/file_uploads/${fileUploadId}/complete` });
+  }
+
+  /**
    * §16検証済み（2026-07-19）: `after`パラメータは廃止済みで指定すると400になる。
    * 代わりに `position: { type: 'after_block', after_block: { id } }` を使う。
    */

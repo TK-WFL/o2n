@@ -12,6 +12,8 @@ interface CallRecord {
   method: string;
   path: string;
   body?: unknown;
+  /** multipart/form-data の場合のフィールド（file以外） */
+  form?: Record<string, string>;
 }
 
 function createMockServer() {
@@ -29,14 +31,20 @@ function createMockServer() {
     const p = u.pathname.replace('/v1', '');
     const bodyText = init?.body;
     let body: unknown;
+    let form: Record<string, string> | undefined;
     if (typeof bodyText === 'string') {
       try {
         body = JSON.parse(bodyText);
       } catch {
         body = undefined;
       }
+    } else if (bodyText instanceof FormData) {
+      form = {};
+      for (const [k, v] of bodyText.entries()) {
+        if (typeof v === 'string') form[k] = v;
+      }
     }
-    calls.push({ method, path: p, body });
+    calls.push({ method, path: p, body, form });
 
     if (failNextWith429) {
       failNextWith429 = false;
@@ -99,6 +107,10 @@ function createMockServer() {
 
     if (method === 'POST' && p === '/file_uploads') {
       return jsonResponse({ id: 'file-upload-1', upload_url: 'https://upload.example/1' });
+    }
+
+    if (method === 'POST' && /\/file_uploads\/.+\/complete$/.test(p)) {
+      return jsonResponse({ id: 'file-upload-1', status: 'uploaded' });
     }
 
     if (method === 'POST' && /\/file_uploads\/.+\/send$/.test(p)) {
@@ -403,5 +415,48 @@ describe('migrator 3パス統合テスト（モック）', () => {
     const secondPageCreateCount = calls.filter((c) => c.method === 'POST' && c.path === '/pages').length;
 
     expect(secondPageCreateCount).toBe(firstPageCreateCount);
+  });
+});
+
+describe('マルチパートアップロード', () => {
+  it('パートサイズ超のファイルは part_number 付きで分割送信され、最後に /complete が呼ばれる', async () => {
+    // 1 KiB のパートサイズを注入し、2.5 KiB のファイルで3パート経路を通す
+    await fs.writeFile(path.join(tmpDir, 'Sub', 'big.pdf'), Buffer.alloc(2560, 1));
+    await fs.writeFile(path.join(tmpDir, 'Big.md'), '# Big\n\n![[big.pdf]]\n');
+    const { fetchImpl, calls } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+    const state = await StateStore.load(tmpDir, 'root-page');
+
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false, multipartPartSizeBytes: 1024 });
+
+    const createIdx = calls.findIndex((c) => c.method === 'POST' && c.path === '/file_uploads' && (c.body as { filename?: string })?.filename === 'big.pdf');
+    expect(createIdx).toBeGreaterThanOrEqual(0);
+    expect(calls[createIdx]?.body).toMatchObject({ mode: 'multi_part', number_of_parts: 3, content_type: 'application/pdf' });
+
+    const completeIdx = calls.findIndex((c, i) => i > createIdx && c.method === 'POST' && /\/file_uploads\/.+\/complete$/.test(c.path));
+    expect(completeIdx).toBeGreaterThan(createIdx);
+
+    // create と complete の間に、part_number 1..3 の send がこの順で並ぶ（他ファイルの single_part 送信は混ざらない）
+    const between = calls.slice(createIdx + 1, completeIdx).filter((c) => c.method === 'POST' && /\/file_uploads\/.+\/send$/.test(c.path));
+    expect(between.map((c) => c.form?.part_number)).toEqual(['1', '2', '3']);
+    expect(state.getFile('Sub/big.pdf')?.status).toBe('attached');
+  });
+
+  it('パートサイズ以下のファイルは single_part で送られ /complete は呼ばれない', async () => {
+    const { fetchImpl, calls } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+    const state = await StateStore.load(tmpDir, 'root-page');
+
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+
+    const create = calls.find((c) => c.method === 'POST' && c.path === '/file_uploads');
+    expect(create?.body).toMatchObject({ mode: 'single_part' });
+    expect(calls.some((c) => /\/complete$/.test(c.path))).toBe(false);
   });
 });

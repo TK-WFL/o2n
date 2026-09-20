@@ -56,19 +56,29 @@ databaseモードのDB ID・data source ID）を永続化する仕組みが無�
 既存計画ファイルを読み込んで実行する設計と解釈した（`plan-store.ts` の `loadOrCreatePlan`）。
 計画が存在しない場合は `get_plan` 相当のデフォルト自動生成を `start_migration` 内でも行うようにしている。
 
-## 5. マルチパートファイルアップロードの完了フローは簡略化（単発アップロードは実ワークスペースで検証済み）
+## 5. マルチパートファイルアップロードは全パート送信後に `/complete` を呼ぶ（2026-09-20 修正）
 
-**該当**: `packages/core/src/migrator.ts` `uploadFile`
+**該当**: `packages/core/src/migrator.ts` `uploadFile`、`notion-client.ts` `completeFileUpload`
 
 単発アップロード（20MiB以下）は実ワークスペースで検証済み。`createFileUpload`時に`content_type`を
 明示しないと、送信時に「作成時に決定された元のcontent typeと一致しない」400エラーになることが判明し、
 拡張子からMIMEタイプを推定して明示するよう修正した。また、作成直後（数百ms以内）に送信すると同エラーが
 発生するケースがあり、1回リトライすることで回避している。
 
-マルチパート（20MiB超）の完了フローは「各パートを `POST /v1/file_uploads/:id/send` に順次送信する」
-という一般的なパターンで実装したが、実ワークスペースでは未検証（テストファイルが小さいため）。
-実際のAPIが「全パート送信後に別途completeエンドポイントを呼ぶ」等の追加ステップを要求する場合は
-修正が必要。
+マルチパート（20MiB超）は当初「各パートを `POST /v1/file_uploads/:id/send` に順次送信する」だけの
+実装で、完了ステップを呼んでいなかった（#65）。Notion公式ガイド
+[Sending larger files](https://developers.notion.com/guides/data-apis/sending-larger-files) は
+「全パート送信後に [Complete a file upload](https://developers.notion.com/reference/complete-a-file-upload)
+（`POST /v1/file_uploads/:id/complete`、ボディなし）を呼ぶ」ことを必須としており、これを呼ばないと
+アップロードは `pending` のまま完了しない。現在は全パート送信後に `/complete` を呼び、レスポンスの
+`status` が `uploaded` でなければエラーにしている。パートサイズ規約（各パート5〜20 MiB、最終パートのみ
+5 MiB未満可）は20 MiB分割で満たしている。
+
+テストは `MigratorOptions.multipartPartSizeBytes` でパートサイズを1 KiBに差し替え、2.5 KiBのファイルで
+「3パート送信 → complete」の順序を検証している（`migrator.test.ts`）。実ワークスペースでの20 MiB超
+ファイルの確認は #82（全体動作確認）で行う。
+
+---
 
 ## 6. コードブロック内のwikilink/highlight等は変換対象外にした
 

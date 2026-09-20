@@ -24,6 +24,13 @@ export interface MigratorOptions {
   dryRun: boolean;
   /** ノート単位の進捗コールバック（総ノート数ベースの進捗表示用） */
   onProgress?: (done: number, total: number, notePath: string) => void;
+  /**
+   * マルチパートアップロードのパートサイズ（既定20 MiB = Notionの単一パート上限）。
+   * テストで小さなファイルでもマルチパート経路を通すために差し替え可能にしている。
+   * 実運用でNotionの規約（各パート5〜20 MiB、最終パートのみ5 MiB未満可）を外れる値を
+   * 指定するとsendが400になるため変更しないこと。
+   */
+  multipartPartSizeBytes?: number;
 }
 
 interface Container {
@@ -330,12 +337,18 @@ async function sendWithRetry(api: NotionApi, uploadId: string, buildForm: () => 
   }
 }
 
-async function uploadFile(api: NotionApi, absPath: string, size: number, dryRun: boolean): Promise<string> {
+async function uploadFile(
+  api: NotionApi,
+  absPath: string,
+  size: number,
+  dryRun: boolean,
+  partSize: number = SINGLE_PART_LIMIT,
+): Promise<string> {
   const filename = path.basename(absPath);
   if (dryRun) return `dry-run-upload-${filename}`;
   const contentType = mimeTypeFor(filename);
 
-  if (size <= SINGLE_PART_LIMIT) {
+  if (size <= partSize) {
     const created = await api.createFileUpload({ filename, content_type: contentType, mode: 'single_part' });
     const buf = await fs.readFile(absPath);
     await sendWithRetry(api, created.id, () => {
@@ -346,15 +359,16 @@ async function uploadFile(api: NotionApi, absPath: string, size: number, dryRun:
     return created.id;
   }
 
-  // マルチパート: §4.1 マルチパートアップロード。実ワークスペースでの完了フローは docs/questions.md 参照
-  const numberOfParts = Math.ceil(size / SINGLE_PART_LIMIT);
+  // マルチパート: §4.1。各パートを part_number 付きで送り、最後に /complete を呼ぶ
+  // （complete を呼ばないとアップロードが pending のまま完了しない。docs/questions.md §5）
+  const numberOfParts = Math.ceil(size / partSize);
   const created = await api.createFileUpload({ filename, content_type: contentType, mode: 'multi_part', number_of_parts: numberOfParts });
   const fh = await fs.open(absPath, 'r');
   try {
     for (let i = 0; i < numberOfParts; i += 1) {
-      const partSize = Math.min(SINGLE_PART_LIMIT, size - i * SINGLE_PART_LIMIT);
-      const buf = Buffer.alloc(partSize);
-      await fh.read(buf, 0, partSize, i * SINGLE_PART_LIMIT);
+      const thisPartSize = Math.min(partSize, size - i * partSize);
+      const buf = Buffer.alloc(thisPartSize);
+      await fh.read(buf, 0, thisPartSize, i * partSize);
       await sendWithRetry(api, created.id, () => {
         const form = new FormData();
         form.append('file', new Blob([buf], { type: contentType }), filename);
@@ -364,6 +378,10 @@ async function uploadFile(api: NotionApi, absPath: string, size: number, dryRun:
     }
   } finally {
     await fh.close();
+  }
+  const completed = await api.completeFileUpload(created.id);
+  if (completed.status && completed.status !== 'uploaded') {
+    throw new Error(`マルチパートアップロードが完了しませんでした (status: ${completed.status})`);
   }
   return created.id;
 }
@@ -425,7 +443,7 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
             report.push({ category: 'oversized_file', path: file.targetPath, message: 'ワークスペースのファイルサイズ上限を超過したためスキップしました' });
             continue;
           }
-          fileUploadId = await uploadFile(api, absPath, stat.size, dryRun);
+          fileUploadId = await uploadFile(api, absPath, stat.size, dryRun, opts.multipartPartSizeBytes);
           await state.setFile(file.targetPath, { status: 'uploaded', fileUploadId });
         } catch (err) {
           await state.setFile(file.targetPath, { status: 'failed', error: String(err) });
