@@ -23,6 +23,7 @@ import {
   blockLimitWarning,
   estimateBlockCount,
   wasAbortedByBlockLimit,
+  rateLimitFromEnv,
 } from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
 import { getJob, setJob } from './jobs.js';
@@ -222,7 +223,7 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
       try {
         const token = process.env.NOTION_TOKEN ?? (await loadCredentials())?.token ?? (dryRun ? 'dry-run-placeholder-token' : '');
         if (!token) throw new Error('Notionと連携されていません。CLIで `o2n login` を実行するか、NOTION_TOKEN を設定してください。');
-        const client = new NotionClient({ token, dryRun });
+        const client = new NotionClient({ token, dryRun, rateLimit: rateLimitFromEnv() });
         const api = new NotionApi(client);
         const me = dryRun ? undefined : await api.getMe();
         const state = await StateStore.load(resolved, plan.parentPageId, {

@@ -15,6 +15,7 @@ import {
   readVaultStateFile,
   type MigrationPlan,
   type ReportEntry,
+  rateLimitFromEnv,
 } from '@tk_wfl/o2n-core';
 import { getToken } from '../token.js';
 
@@ -46,7 +47,7 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
 
   const token = await getToken(dryRun);
   const inventory = await scanVault(vaultPath);
-  const client = new NotionClient({ token, dryRun });
+  const client = new NotionClient({ token, dryRun, rateLimit: rateLimitFromEnv() });
   const api = new NotionApi(client);
   const me = dryRun ? undefined : await api.getMe();
   const state = await StateStore.load(vaultPath, plan.parentPageId, {

@@ -101,6 +101,10 @@ is suggested automatically (the final call is always made by the user via `plan`
 Roughly 1,000 notes + 500 attachments ≈ 4,000–5,000 API calls ≈ ~30–40 minutes at an effective
 rate of 2.5 req/s.
 
+The default rate is 2 req/s (Notion's per-connection limit is 180 req/min on Free/Plus and
+600 req/min on Business/Enterprise). On Business or higher you can raise it with
+`O2N_REQUESTS_PER_SECOND=8` (1–10) to shorten the migration; 429 responses are honored via `Retry-After`.
+
 ## Notion Free plan block limit
 
 Since September 2026, **multi-member Free workspaces** have a lifetime cap of 1,000 blocks that is
