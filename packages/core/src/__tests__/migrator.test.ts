@@ -19,7 +19,9 @@ interface CallRecord {
 function createMockServer() {
   const calls: CallRecord[] = [];
   let pageCounter = 0;
-  const pageBlocks = new Map<string, Array<{ id: string; type: string; paragraph: { rich_text: Array<{ text: { content: string } }> } }>>();
+  const pageBlocks = new Map<string, MockBlock[]>();
+  /** GET children を1ページあたり何件返すか（Notion実機は最大100。ページネーションのテスト用） */
+  let childrenPageSize = 100;
   let failNextWith429 = false;
   let failNextLinkPatchWith400 = false;
   let failNextFileSendWith400 = false;
@@ -88,8 +90,16 @@ function createMockServer() {
     }
 
     if (method === 'GET' && /\/blocks\/.+\/children$/.test(p)) {
-      const pageId = p.split('/')[2] ?? '';
-      return jsonResponse({ results: pageBlocks.get(pageId) ?? [] });
+      const blockId = p.split('/')[2] ?? '';
+      const all = pageBlocks.get(blockId) ?? [];
+      const start = Number(u.searchParams.get('start_cursor') ?? '0');
+      const slice = all.slice(start, start + childrenPageSize);
+      const hasMore = start + childrenPageSize < all.length;
+      return jsonResponse({
+        results: slice.map(({ children: _children, ...rest }) => rest),
+        has_more: hasMore,
+        next_cursor: hasMore ? String(start + childrenPageSize) : null,
+      });
     }
 
     if (method === 'PATCH' && /\/blocks\/.+\/children$/.test(p)) {
@@ -130,7 +140,22 @@ function createMockServer() {
     triggerNext429: () => { failNextWith429 = true; },
     triggerNextLinkPatch400: () => { failNextLinkPatchWith400 = true; },
     setAlwaysFailFileSend: (v: boolean) => { alwaysFailFileSend = v; },
+    setChildrenPageSize: (n: number) => { childrenPageSize = n; },
+    /** テストからページのブロック構造を直接差し替える（ネスト構造の再現用） */
+    setPageBlocks: (pageId: string, blocks: MockBlock[]) => {
+      pageBlocks.set(pageId, blocks);
+      for (const b of blocks) if (b.children) pageBlocks.set(b.id, b.children);
+    },
+    getPageBlocks: (pageId: string) => pageBlocks.get(pageId) ?? [],
   };
+}
+
+interface MockBlock {
+  id: string;
+  type: string;
+  has_children?: boolean;
+  children?: MockBlock[];
+  [key: string]: unknown;
 }
 
 function jsonResponse(data: unknown, status = 200): Response {
@@ -143,7 +168,7 @@ function jsonResponse(data: unknown, status = 200): Response {
  * としてブロック化する。テストでもこれを再現し、型を限定した検索の回帰を防ぐ。
  */
 function extractFileBlocks(markdown: string, pageId: string) {
-  const blocks: Array<{ id: string; type: string; [key: string]: unknown }> = [];
+  const blocks: MockBlock[] = [];
   const re = /⟦o2n-file-\d+⟧/g;
   const lines = markdown.split('\n');
   let n = 0;
@@ -458,5 +483,106 @@ describe('マルチパートアップロード', () => {
     const create = calls.find((c) => c.method === 'POST' && c.path === '/file_uploads');
     expect(create?.body).toMatchObject({ mode: 'single_part' });
     expect(calls.some((c) => /\/complete$/.test(c.path))).toBe(false);
+  });
+});
+
+/**
+ * POST /pages 直後に、そのページのブロック構造を差し替える fetch ラッパー。
+ * mock は本文中のプレースホルダー行しかブロック化しないため、100ブロック超やネスト構造を
+ * 再現したいテストで使う（プレースホルダーを含まないページは対象外）。
+ */
+function withPageBlocksRewrite(
+  mock: ReturnType<typeof createMockServer>,
+  rewrite: (pageId: string, existing: MockBlock[]) => MockBlock[],
+): typeof fetch {
+  return (async (url: string | URL, init?: RequestInit) => {
+    const res = await mock.fetchImpl(url, init);
+    if ((init?.method ?? 'GET') === 'POST' && new URL(String(url)).pathname === '/v1/pages') {
+      const { id } = (await res.clone().json()) as { id: string };
+      const existing = mock.getPageBlocks(id);
+      if (existing.length > 0) mock.setPageBlocks(id, rewrite(id, existing));
+    }
+    return res;
+  }) as typeof fetch;
+}
+
+describe('添付プレースホルダーの探索（#66）', () => {
+  it('100ブロック超のページでもページネーションして後半のプレースホルダーを見つける', async () => {
+    // 先頭に段落を大量に置き、画像を最後に埋め込む（Notion実機では1回のGETは最大100件）
+    const filler = Array.from({ length: 150 }, (_, i) => `段落 ${i}`).join('\n\n');
+    await fs.writeFile(path.join(tmpDir, 'Long.md'), `# Long\n\n${filler}\n\n![[pic.png]]\n`);
+    const mock = createMockServer();
+    mock.setChildrenPageSize(100);
+    // mock の POST /pages はプレースホルダー行しかブロック化しないので、段落ブロックを前に詰めて再現する
+    const fetchImpl = withPageBlocksRewrite(mock, (id, existing) => [
+      ...Array.from({ length: 150 }, (_, i): MockBlock => ({
+        id: `${id}-filler-${i}`,
+        type: 'paragraph',
+        paragraph: { rich_text: [{ text: { content: `段落 ${i}` } }] },
+      })),
+      ...existing,
+    ]);
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+    const state = await StateStore.load(tmpDir, 'root-page');
+
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+
+    expect(state.getNote('Long.md')?.status).toBe('done');
+    expect(state.getNote('Long.md')?.attachedPlaceholders?.length).toBe(1);
+    const childrenGets = mock.calls.filter((c) => c.method === 'GET' && /\/blocks\/page-.+\/children$/.test(c.path));
+    // 151ブロック → 2ページ分のGETが行われている
+    expect(childrenGets.length).toBeGreaterThanOrEqual(2);
+    expect(mock.calls.some((c) => c.method === 'PATCH' && /\/blocks\/.+\/children$/.test(c.path))).toBe(true);
+  });
+
+  it('ネストしたリスト項目の子ブロックにあるプレースホルダーも見つける', async () => {
+    await fs.writeFile(path.join(tmpDir, 'Nested.md'), '# Nested\n\n- 親\n  - ![[pic.png]]\n');
+    const mock = createMockServer();
+    // Notion実機の保存形態を再現: 親リスト項目(has_children) の子にプレースホルダー入りリスト項目
+    const fetchImpl = withPageBlocksRewrite(mock, (id, existing) => [
+      {
+        id: `${id}-parent`,
+        type: 'bulleted_list_item',
+        has_children: true,
+        bulleted_list_item: { rich_text: [{ text: { content: '親' } }] },
+        children: existing.map((b) => ({ ...b, id: `${id}-child-0` })),
+      },
+    ]);
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+    const state = await StateStore.load(tmpDir, 'root-page');
+
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+
+    expect(state.getNote('Nested.md')?.status).toBe('done');
+    expect(state.getFile('Sub/pic.png')?.status).toBe('attached');
+    // 子ブロック一覧の取得が親ブロックに対しても行われている
+    expect(mock.calls.some((c) => c.method === 'GET' && /-parent\/children$/.test(c.path))).toBe(true);
+    // 削除されたのは子側のプレースホルダーブロック
+    expect(mock.calls.some((c) => c.method === 'DELETE' && /-child-0$/.test(c.path))).toBe(true);
+  });
+
+  it('プレースホルダーが複数あっても子ブロック一覧の取得はノートにつき1回にまとまる', async () => {
+    await fs.writeFile(path.join(tmpDir, 'Multi.md'), '# Multi\n\n![[pic.png]]\n\n![[pic.png]]\n\n![[pic.png]]\n');
+    const mock = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', fetchImpl: mock.fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const api = new NotionApi(client);
+    const state = await StateStore.load(tmpDir, 'root-page');
+
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+
+    expect(state.getNote('Multi.md')?.attachedPlaceholders?.length).toBe(3);
+    // ページごとの children GET は1回（3プレースホルダーで3回にならない）
+    const gets = mock.calls.filter((c) => c.method === 'GET' && /\/blocks\/page-.+\/children$/.test(c.path));
+    const byPage = new Map<string, number>();
+    for (const g of gets) byPage.set(g.path, (byPage.get(g.path) ?? 0) + 1);
+    for (const n of byPage.values()) expect(n).toBe(1);
   });
 });

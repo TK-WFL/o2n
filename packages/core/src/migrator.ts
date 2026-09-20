@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildNameIndex, resolveByFilename } from './scanner.js';
 import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext } from './converter.js';
-import { NotionApiError, type NotionApi, type UpdateContentItem } from './notion-client.js';
+import { NotionApiError, type NotionApi, type NotionBlock, type UpdateContentItem } from './notion-client.js';
 import type { StateStore } from './state.js';
 import { contentHash, isNoteUpToDate } from './state.js';
 import { createDatabaseForFolder, buildRowProperties } from './notion-db.js';
@@ -386,6 +386,49 @@ async function uploadFile(
   return created.id;
 }
 
+/**
+ * ページ内から添付プレースホルダーを含むブロックを探し、placeholder → blockId の対応を返す。
+ * - 子ブロック一覧はページネーションで全件取得する（100ブロック超対応）
+ * - ネストしたリスト項目など `has_children` のブロックは再帰して探す（深さ上限 maxDepth）。
+ *   ただし子ページ/子DBの中には入らない
+ * - 探しているプレースホルダーが全て見つかった時点で打ち切り、無駄なGETを避ける
+ */
+async function findPlaceholderBlocks(
+  api: NotionApi,
+  pageId: string,
+  wanted: Set<string>,
+  maxDepth = 3,
+): Promise<Map<string, string>> {
+  const found = new Map<string, string>();
+  const remaining = new Set(wanted);
+
+  async function search(blockId: string, depth: number): Promise<void> {
+    if (remaining.size === 0 || depth > maxDepth) return;
+    const children = await api.listAllBlockChildren(blockId);
+    const toDescend: NotionBlock[] = [];
+    for (const block of children) {
+      // §16検証済み: プレースホルダーは paragraph 以外（bulleted_list_item 等）にも入るため型を限定しない
+      const json = JSON.stringify(block);
+      for (const ph of remaining) {
+        if (json.includes(ph)) {
+          found.set(ph, block.id);
+          remaining.delete(ph);
+        }
+      }
+      if (block.has_children && block.type !== 'child_page' && block.type !== 'child_database') {
+        toDescend.push(block);
+      }
+    }
+    for (const block of toDescend) {
+      if (remaining.size === 0) return;
+      await search(block.id, depth + 1);
+    }
+  }
+
+  await search(pageId, 1);
+  return found;
+}
+
 async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
   const { inventory, state, api, dryRun, vaultPath } = opts;
 
@@ -414,6 +457,24 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
     }
 
     const attachedPlaceholders = new Set(noteState.attachedPlaceholders ?? []);
+
+    // このノートで今回ブロック置換が必要なプレースホルダーを先に集め、子ブロックの取得は
+    // ノートにつき1回にまとめる（以前はプレースホルダーごとにGETしていた）。
+    const lookupTargets = new Set<string>();
+    for (const file of reconverted.pendingFiles) {
+      if (!file.targetPath || attachedPlaceholders.has(file.placeholder)) continue;
+      if (state.getFile(file.targetPath)?.status === 'skipped') continue;
+      lookupTargets.add(file.placeholder);
+    }
+    let placeholderBlocks = new Map<string, string>();
+    if (!dryRun && lookupTargets.size > 0) {
+      try {
+        placeholderBlocks = await findPlaceholderBlocks(api, noteState.pageId, lookupTargets);
+      } catch (err) {
+        report.push({ category: 'warning', path: note.path, message: `子ブロックの取得に失敗: ${String(err)}` });
+        continue;
+      }
+    }
 
     for (const file of reconverted.pendingFiles) {
       if (!file.targetPath) continue; // 未解決添付はPass1で警告済み
@@ -458,12 +519,8 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       }
 
       try {
-        const children = await api.getBlockChildren(noteState.pageId);
-        // §16検証済み（2026-07-19）: 添付プレースホルダーは箇条書き中に書かれることが多く、
-        // Notionはそれを paragraph ではなく bulleted_list_item 等として保存する。
-        // ブロックタイプを限定せず、プレースホルダー文字列を含むブロックを探す。
-        const placeholderBlock = children.results.find((b) => JSON.stringify(b).includes(file.placeholder));
-        if (!placeholderBlock) {
+        const placeholderBlockId = placeholderBlocks.get(file.placeholder);
+        if (!placeholderBlockId) {
           // この修正より前に作られたstate.json（attachedPlaceholders未記録）は、
           // 過去の実行で正常に貼り付け済みでも記録が残っていない。ファイル自体が
           // 既に'attached'なら「見つからない」のは過去の正常完了である可能性が高いため、
@@ -477,8 +534,8 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
           continue;
         }
         const ext = file.targetPath.split('.').pop() ?? '';
-        await api.appendBlockChildren(noteState.pageId, [buildAttachmentBlock(fileUploadId!, ext)], placeholderBlock.id);
-        await api.deleteBlock(placeholderBlock.id);
+        await api.appendBlockChildren(noteState.pageId, [buildAttachmentBlock(fileUploadId!, ext)], placeholderBlockId);
+        await api.deleteBlock(placeholderBlockId);
         await state.setFile(file.targetPath, { status: 'attached', fileUploadId });
         attachedPlaceholders.add(file.placeholder);
         await state.setNote(note.path, { ...state.getNote(note.path)!, attachedPlaceholders: [...attachedPlaceholders] });
