@@ -172,10 +172,28 @@ export class StateStore {
     return this.persist();
   }
 
+  private dirty = false;
+
+  /**
+   * 書き込みをまとめる（#111）: 以前は setNote/setFile のたびに state.json 全体を署名・書き直して
+   * いたため、1万ノート規模では O(n²) の CPU/ディスク負荷が支配的だった。現在は「書き込み中に
+   * 来た更新はまとめて次の1回で書く」ため、ディスク書き込み回数は API 呼び出し回数ではなく
+   * 書き込み1回の所要時間で決まる。最後に flush() で確実に書き切る（runMigration が呼ぶ）。
+   */
   private persist(): Promise<void> {
     if (this.readOnly) return Promise.resolve();
-    this.writeChain = this.writeChain.then(() => this.writeNow());
+    this.dirty = true;
+    this.writeChain = this.writeChain.then(async () => {
+      if (!this.dirty) return;
+      this.dirty = false;
+      await this.writeNow();
+    });
     return this.writeChain;
+  }
+
+  /** 保留中の書き込みを全て完了させる */
+  async flush(): Promise<void> {
+    await this.writeChain;
   }
 
   private async writeNow(): Promise<void> {

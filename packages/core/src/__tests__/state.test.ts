@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StateIntegrityError, StateStore, planHash, statePath } from '../state.js';
 
 let tmpDir: string;
@@ -73,5 +73,32 @@ describe('StateStore integrity guard', () => {
         notionBotId: 'bot-a',
       }),
     ).rejects.toBeInstanceOf(StateIntegrityError);
+  });
+});
+
+describe('state.json の書き込みまとめ（#111）', () => {
+  it('連続した setNote は書き込み回数がまとめられ、flush 後には全て反映されている', async () => {
+    const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-state-coalesce-')));
+    try {
+      const store = await StateStore.load(dir, 'root');
+      const { promises: fsp } = await import('node:fs');
+      const origWrite = fsp.writeFile;
+      let writes = 0;
+      const spy = vi.spyOn(fsp, 'writeFile').mockImplementation(async (...args) => {
+        if (String(args[0]).includes('state.json')) writes += 1;
+        return origWrite.apply(fsp, args as Parameters<typeof origWrite>);
+      });
+      const pending: Promise<void>[] = [];
+      for (let i = 0; i < 200; i += 1) pending.push(store.setNote(`n${i}.md`, { status: 'done', pageId: `p${i}` }));
+      await Promise.all(pending);
+      await store.flush();
+      spy.mockRestore();
+      expect(writes).toBeLessThan(200);
+      const reloaded = await StateStore.load(dir, 'root');
+      expect(Object.keys(reloaded.snapshot.notes)).toHaveLength(200);
+      expect(reloaded.getNote('n199.md')?.pageId).toBe('p199');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

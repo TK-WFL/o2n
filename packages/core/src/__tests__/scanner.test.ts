@@ -326,3 +326,11 @@ describe('スキャンの堅牢化と大文字小文字非依存の解決（#107
     expect(amb[0]?.candidates?.sort()).toEqual(['X/Same.md', 'Y/Same.md']);
   });
 });
+
+describe('ノートの並び順（#112）', () => {
+  it('同じフォルダ内はファイル名の自然順、フォルダは後ろ、readdir の順序に依存しない', async () => {
+    const { compareVaultPaths } = await import('../scanner.js');
+    const input = ['Sub/x.md', 'b.md', 'A.md', 'note10.md', 'note2.md', 'Sub/a.md', 'Zed/1.md'];
+    expect([...input].sort(compareVaultPaths)).toEqual(['A.md', 'b.md', 'note2.md', 'note10.md', 'Sub/a.md', 'Sub/x.md', 'Zed/1.md']);
+  });
+});
