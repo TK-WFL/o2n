@@ -180,9 +180,20 @@ export interface ReportEntry {
   message: string;
 }
 
+export interface MigrationRunMeta {
+  startedAt: number;
+  finishedAt: number;
+  /** Notion API 呼び出し回数（dry-run は呼ばずに数えた回数） */
+  apiCalls: number;
+  dryRun: boolean;
+  /** 実行前のノート状態（差分表示用） */
+  before: Record<string, NoteStatus>;
+}
+
 export interface MigrationReport {
   successCount: number;
   entries: ReportEntry[];
+  run?: MigrationRunMeta;
 }
 
 export interface ConversionResult {

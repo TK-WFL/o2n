@@ -39,11 +39,18 @@ export async function verifyCommand(vaultPath: string, opts: VerifyCommandOption
     if (summary.untracked.length > 20) console.log(`  ...他${summary.untracked.length - 20}件`);
   }
 
+  if (summary.orphaned.length > 0) {
+    console.log(`\nvault から削除済みのノート (${summary.orphaned.length}件。Notion 上のページは残っている可能性があります):`);
+    for (const o of summary.orphaned.slice(0, 20)) console.log(`  - ${o.path}${o.pageUrl ? `  ${o.pageUrl}` : ''}`);
+    if (summary.orphaned.length > 20) console.log(`  ...他${summary.orphaned.length - 20}件`);
+  }
+
   let deepIssues = 0;
   if (opts.deep) {
     const token = await getToken(false);
     const api = new NotionApi(new NotionClient({ token, dryRun: false, rateLimit: rateLimitFromEnv() }));
     const result = await deepVerifyNotes(api, state, {
+      orphaned: summary.orphaned,
       onProgress: (done, total, notePath) => {
         process.stdout.write(`\r実ページ照合: ${done}/${total} (${notePath})${' '.repeat(20)}`);
       },

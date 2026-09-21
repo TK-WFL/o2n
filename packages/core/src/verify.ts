@@ -8,13 +8,19 @@ export interface VerifySummary {
   counts: Record<NoteState['status'], number>;
   /** vaultにあるがstateに記録の無いノート */
   untracked: string[];
+  /** stateに記録があるがvaultから削除されたノート（Notion 上のページは残っている可能性がある、#115） */
+  orphaned: Array<{ path: string; pageId?: string; pageUrl?: string }>;
 }
 
 export function summarizeState(state: StateFile, inventory: VaultInventory): VerifySummary {
   const counts: VerifySummary['counts'] = { pending: 0, created: 0, linked: 0, attached: 0, done: 0, failed: 0, skipped: 0 };
   for (const s of Object.values(state.notes)) counts[s.status] = (counts[s.status] ?? 0) + 1;
   const untracked = inventory.notes.filter((n) => !state.notes[n.path]).map((n) => n.path);
-  return { vaultNoteCount: inventory.notes.length, trackedNoteCount: Object.keys(state.notes).length, counts, untracked };
+  const present = new Set(inventory.notes.map((n) => n.path));
+  const orphaned = Object.entries(state.notes)
+    .filter(([p, n]) => !present.has(p) && n.status !== 'skipped')
+    .map(([p, n]) => ({ path: p, pageId: n.pageId, pageUrl: n.pageUrl }));
+  return { vaultNoteCount: inventory.notes.length, trackedNoteCount: Object.keys(state.notes).length, counts, untracked, orphaned };
 }
 
 export type DeepVerifyIssueKind =
@@ -27,7 +33,9 @@ export type DeepVerifyIssueKind =
   /** 添付ブロック数が state の貼り付け済み件数より少ない */
   | 'attachment_shortfall'
   /** 取得自体に失敗（レート制限枯渇など） */
-  | 'fetch_error';
+  | 'fetch_error'
+  /** vault から削除されたノートのページが Notion に残っている（削除はしない。利用者が判断する） */
+  | 'page_orphaned';
 
 export interface DeepVerifyIssue {
   path: string;
@@ -60,11 +68,28 @@ const ATTACHMENT_BLOCK_RE = /!\[[^\]\n]*\]\(|<(?:file|pdf|video|audio)\s/g;
 export async function deepVerifyNotes(
   api: NotionApi,
   state: StateFile,
-  opts: { onProgress?: (done: number, total: number, notePath: string) => void } = {},
+  opts: {
+    onProgress?: (done: number, total: number, notePath: string) => void;
+    /** vault から削除済みのノート（summarizeState().orphaned）。ページが残っていれば page_orphaned として報告 */
+    orphaned?: Array<{ path: string; pageId?: string }>;
+  } = {},
 ): Promise<DeepVerifyResult> {
   const targets = Object.entries(state.notes).filter(([, s]) => s.status === 'done' && s.pageId);
   const issues: DeepVerifyIssue[] = [];
   let done = 0;
+  for (const o of opts.orphaned ?? []) {
+    if (!o.pageId) continue;
+    try {
+      const meta = await api.getPage(o.pageId);
+      if (!meta.in_trash) {
+        issues.push({ path: o.path, pageId: o.pageId, kind: 'page_orphaned', message: 'vault から削除されたノートのページが Notion に残っています（自動では削除しません）' });
+      }
+    } catch (err) {
+      if (!(err instanceof NotionApiError && err.status === 404)) {
+        issues.push({ path: o.path, pageId: o.pageId, kind: 'fetch_error', message: `取得に失敗: ${String(err)}` });
+      }
+    }
+  }
   for (const [notePath, s] of targets) {
     const pageId = s.pageId!;
     try {

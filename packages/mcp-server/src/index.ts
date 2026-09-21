@@ -241,6 +241,8 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
           notionBotId: dryRun ? undefined : (me?.id ?? 'unknown-bot'),
           allowUnsignedState: false,
         });
+        const startedAt = Date.now();
+        const before = Object.fromEntries(Object.entries(state.snapshot.notes).map(([p, n]) => [p, n.status]));
         const entries = await runMigration({
           vaultPath: resolved,
           plan,
@@ -252,7 +254,7 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
             setJob(resolved, { status: 'running', done, total, currentPath, startedAt: getJob(resolved)?.startedAt ?? Date.now() });
           },
         });
-        const report = buildReport(state.snapshot, entries);
+        const report = buildReport(state.snapshot, entries, { startedAt, finishedAt: Date.now(), apiCalls: api.callCount, dryRun, before });
         await writeReport(resolved, report, state.snapshot);
         if (wasAbortedByBlockLimit(entries)) {
           setJob(resolved, {
@@ -383,7 +385,7 @@ server.tool(
     const token = process.env.NOTION_TOKEN ?? (await loadCredentials())?.token ?? '';
     if (!token) return text('Notionと連携されていません。NOTION_TOKEN を設定してください。');
     const api = new NotionApi(new NotionClient({ token, dryRun: false, rateLimit: rateLimitFromEnv() }));
-    const result = await deepVerifyNotes(api, state);
+    const result = await deepVerifyNotes(api, state, { orphaned: summary.orphaned });
     return text(JSON.stringify({ ...summary, deep: result }, null, 2));
   },
 );
