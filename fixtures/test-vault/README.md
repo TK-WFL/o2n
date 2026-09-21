@@ -27,3 +27,8 @@
 コミットしない。マルチパート経路のテストは `packages/core/src/__tests__/migrator.test.ts` が
 `multipartPartSizeBytes` オプションでパートサイズを1 KiBに縮小し、一時ディレクトリに生成した数KiBの
 ファイルで「分割送信 → `/complete`」の流れを検証している（`fixtures/test-vault` を汚さない）。
+- `Phase3/`（v0.3.1 の不具合修正の検証用）:
+  - 画像埋め込みの幅指定 `![[img|alt|300]]`、表内の `[[T\|alias]]`、md リンクの `.md#見出し` / `.MD` / 添付リンク（`Embeds2.md`）
+  - callout 内コードブロック・ネストした callout・コードをまたぐ `%%` コメント（`CalloutCode.md`）
+  - 大文字小文字違いの wikilink（`CaseLink.md`）
+  - 非 YAML frontmatter は skipped になり vault 全体は止まらない（`BadFrontmatter.md`）

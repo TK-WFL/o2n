@@ -85,11 +85,14 @@ describe('migrator 3パス統合テスト（モック）', () => {
     await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
 
     expect(state.getNote('DoubleEmbed.md')?.status).toBe('done');
-    // 添付ブロック挿入(PATCH .../children)とプレースホルダー削除(DELETE)がそれぞれ2回ずつ呼ばれること
+    // 添付ブロック挿入(PATCH .../children)が2回。プレースホルダーは文中（「1つ目: …」）にあるので
+    // ブロック削除ではなく本文更新(PATCH /blocks/:id)で取り除かれ、周囲の文章は残る
     const appendCalls = calls.filter((c) => c.method === 'PATCH' && /\/blocks\/.+\/children$/.test(c.path));
-    const deleteCalls = calls.filter((c) => c.method === 'DELETE' && /\/blocks\//.test(c.path));
+    const updateCalls = calls.filter((c) => c.method === 'PATCH' && /^\/blocks\/[^/]+$/.test(c.path));
     expect(appendCalls.length).toBeGreaterThanOrEqual(2);
-    expect(deleteCalls.length).toBeGreaterThanOrEqual(2);
+    expect(updateCalls.length).toBeGreaterThanOrEqual(2);
+    const updated = updateCalls.map((c) => JSON.stringify(c.body));
+    expect(updated.some((u) => u.includes('1つ目:') && !u.includes('⟦o2n-file'))).toBe(true);
   });
 
   it('429を人工的に発生させてもバックオフして完走する', async () => {
@@ -462,5 +465,20 @@ describe('aliases によるリンク解決（#77）', () => {
     expect(JSON.stringify(linkPatch?.body)).toContain(`notion.so/${aliasedPageId}`);
     expect(report.some((e) => e.category === 'unresolved_link' && e.message.includes('別名A'))).toBe(false);
     expect(report.some((e) => e.category === 'unresolved_link' && e.message.includes('存在しない'))).toBe(true);
+  });
+});
+
+describe('文中の添付プレースホルダー（v0.3.1）', () => {
+  it('プレースホルダーだけのブロックは削除、文章と同居するブロックは本文からプレースホルダーだけ除く', async () => {
+    await fs.writeFile(path.join(tmpDir, 'Inline.md'), '# Inline\n\n![[pic.png]]\n\n資料は ![[pic.png]] を参照\n');
+    const { fetchImpl, calls } = createMockServer();
+    const { inventory, plan, api, state } = await (await import('./helpers/mock-notion.js')).setupMigration(tmpDir, fetchImpl);
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+    const pageId = state.getNote('Inline.md')!.pageId!;
+    const own = calls.filter((c) => c.path.includes(`${pageId}-block`) || c.path === `/blocks/${pageId}/children`);
+    expect(own.some((c) => c.method === 'DELETE' && c.path.endsWith('-block-0'))).toBe(true);
+    const upd = own.find((c) => c.method === 'PATCH' && c.path.endsWith('-block-1'));
+    expect(JSON.stringify(upd?.body)).toContain('資料は  を参照');
+    expect(state.getNote('Inline.md')?.attachedPlaceholders).toHaveLength(2);
   });
 });

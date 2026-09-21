@@ -341,6 +341,11 @@ export class NotionApi {
     });
   }
 
+  /** ブロックの本文（rich_text 等）を更新する。type ごとのキー（paragraph 等）は呼び出し側が組み立てる */
+  async updateBlock(blockId: string, body: Record<string, unknown>): Promise<NotionBlock> {
+    return this.client.request({ method: 'PATCH', path: `/blocks/${blockId}`, body });
+  }
+
   async deleteBlock(blockId: string): Promise<void> {
     await this.client.request({ method: 'DELETE', path: `/blocks/${blockId}` });
   }
