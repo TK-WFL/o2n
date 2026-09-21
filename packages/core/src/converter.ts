@@ -125,21 +125,42 @@ interface Segment {
   lang?: string;
 }
 
-function splitCodeFences(content: string): Segment[] {
-  const segments: Segment[] = [];
-  const re = /```([^\n`]*)\n([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) {
-    if (m.index > lastIndex) {
-      segments.push({ type: 'text', content: content.slice(lastIndex, m.index) });
+/** 行頭の fenced code block 開始/終了（``` または ~~~）。`>` で始まる引用/callout 内の fence は対象外 */
+const FENCE_LINE_RE = /^ {0,3}(`{3,}|~{3,})([^\n`]*)$/;
+
+/**
+ * fenced code block の範囲を [開始行, 終了行] で返す（終了フェンスが無ければ文末まで）。
+ * `> ```` のように引用/callout 内にあるものは含めない（callout 変換側で扱う、#104）。
+ */
+export function findFenceRanges(lines: string[]): Array<{ start: number; end: number; lang: string }> {
+  const ranges: Array<{ start: number; end: number; lang: string }> = [];
+  let open: { start: number; marker: string; lang: string } | null = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = FENCE_LINE_RE.exec(lines[i]!);
+    if (!m) continue;
+    const marker = m[1]!;
+    if (!open) {
+      open = { start: i, marker, lang: (m[2] ?? '').trim() };
+    } else if (marker[0] === open.marker[0] && marker.length >= open.marker.length && (m[2] ?? '').trim() === '') {
+      ranges.push({ start: open.start, end: i, lang: open.lang });
+      open = null;
     }
-    segments.push({ type: 'code', content: m[0], lang: (m[1] ?? '').trim() });
-    lastIndex = m.index + m[0].length;
   }
-  if (lastIndex < content.length) {
-    segments.push({ type: 'text', content: content.slice(lastIndex) });
+  if (open) ranges.push({ start: open.start, end: lines.length - 1, lang: open.lang });
+  return ranges;
+}
+
+function splitCodeFences(content: string): Segment[] {
+  const lines = content.split('\n');
+  const segments: Segment[] = [];
+  let cursor = 0;
+  for (const r of findFenceRanges(lines)) {
+    if (r.start > cursor) segments.push({ type: 'text', content: lines.slice(cursor, r.start).join('\n') + '\n' });
+    const isLast = r.end === lines.length - 1;
+    segments.push({ type: 'code', content: lines.slice(r.start, r.end + 1).join('\n') + (isLast ? '' : '\n'), lang: r.lang });
+    cursor = r.end + 1;
   }
+  if (cursor < lines.length) segments.push({ type: 'text', content: lines.slice(cursor).join('\n') });
   return segments;
 }
 
@@ -213,21 +234,15 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
   let i = 0;
   while (i < lines.length) {
     const line = lines[i] ?? '';
-    // ReDoS対策（CodeQL js/polynomial-redos）: 種別の後ろに空白量指定（`\s*`や`[ \t]*`）を
-    // 置くと、直後の `(.*)` と文字集合が重なりバックトラックの余地が残る。
-    // タイトルは後段で trim するため正規表現側で空白を消費する必要はなく、
-    // 量指定子ごと削除して曖昧さを構造的に排除している。
+    // ReDoS対策（CodeQL js/polynomial-redos）: 種別の後ろに空白量指定を置くと `(.*)` と重なるため
+    // 量指定子を置かず、タイトルは後段で trim する。
     const calloutMatch = /^>[ \t]?\[!(\w+)\]([-+]?)(.*)$/.exec(line);
     if (calloutMatch) {
       const [, rawType, fold, titleText] = calloutMatch;
       const type = (rawType ?? '').toLowerCase();
       const style = CALLOUT_TYPE_MAP[type] ?? DEFAULT_CALLOUT;
       if (!CALLOUT_TYPE_MAP[type]) {
-        entries.push({
-          category: 'downgraded',
-          path: sourcePath,
-          message: `未知のcallout種別 "${type}" をデフォルト表示(ℹ️/gray)に変換しました`,
-        });
+        entries.push({ category: 'downgraded', path: sourcePath, message: `未知のcallout種別 "${type}" をデフォルト表示(ℹ️/gray)に変換しました` });
       }
       const bodyLines: string[] = [];
       let j = i + 1;
@@ -236,20 +251,15 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
         j += 1;
       }
       const title = (titleText ?? '').trim() || type.charAt(0).toUpperCase() + type.slice(1);
-      // §16検証済み: callout内の改行は\nではなく<br>でないと</callout>の位置がずれて壊れる
-      const body = bodyLines.join('<br>').trim();
       if (fold === '-') {
         // 折りたたみ callout（既定で閉じる）は Notion のトグルに変換する（#75）。
-        // 実ワークスペース検証（2026-09-20、docs/questions.md §19）: <details> は
-        // 1行に書くと認識されず、<details>/<summary>/本文/</details> を別行にすると
-        // toggle ブロックになり、内側の <callout> も子ブロックとして保持される。
-        // `+`（既定で開く）は通常 callout のまま（Notion の callout は常に展開表示）。
-        const inner = body ? `\n<callout icon="${style.icon}" color="${style.color}">${body}</callout>` : '';
-        out.push(`<details>\n<summary>**${title}**</summary>${inner}\n</details>`);
-        i = j;
-        continue;
+        // 実ワークスペース検証（docs/questions.md §19）: <details> は複数行形式で toggle ブロックになり、
+        // 内側の <callout> も子ブロックとして保持される。`+`（既定で開く）は通常 callout のまま。
+        const bodyOnly = bodyLines.length > 0 ? `\n${renderCallout(style, null, bodyLines, entries, sourcePath)}` : '';
+        out.push(`<details>\n<summary>**${title}**</summary>${bodyOnly}\n</details>`);
+      } else {
+        out.push(renderCallout(style, title, bodyLines, entries, sourcePath));
       }
-      out.push(`<callout icon="${style.icon}" color="${style.color}">**${title}**${body ? `<br>${body}` : ''}</callout>`);
       i = j;
       continue;
     }
@@ -257,6 +267,63 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
     i += 1;
   }
   return out.join('\n');
+}
+
+/**
+ * callout 本文を Notion の enhanced markdown にする。
+ * - プレーンな行だけなら1行形式（§16検証済み: 改行は `<br>`）
+ * - コードブロックやネストした callout を含む場合は複数行形式（実ワークスペース検証 2026-09-21、
+ *   docs/questions.md §21: `<callout>` 内に改行区切りでコードブロック・`<callout>` を置くと
+ *   子ブロックとして保持される）。ネストした callout は再帰的に変換する（#104, #110）
+ */
+function renderCallout(
+  style: { icon: string; color: string },
+  title: string | null,
+  bodyLines: string[],
+  entries: ReportEntry[],
+  sourcePath: string,
+): string {
+  const fenceRanges = findFenceRanges(bodyLines);
+  const isNestedStart = (l: string) => /^>[ \t]?\[!\w+\]/.test(l);
+  const open = `<callout icon="${style.icon}" color="${style.color}">`;
+  const heading = title === null ? '' : `**${title}**`;
+
+  if (fenceRanges.length === 0 && !bodyLines.some(isNestedStart)) {
+    const body = bodyLines.join('<br>').trim();
+    const sep = heading && body ? '<br>' : '';
+    return `${open}${heading}${sep}${body}</callout>`;
+  }
+
+  const inner: string[] = [];
+  let plain: string[] = [];
+  const flushPlain = () => {
+    const body = plain.join('<br>').trim();
+    if (body) inner.push(body);
+    plain = [];
+  };
+  let k = 0;
+  while (k < bodyLines.length) {
+    const fence = fenceRanges.find((r) => r.start === k);
+    if (fence) {
+      flushPlain();
+      inner.push(bodyLines.slice(fence.start, fence.end + 1).join('\n'));
+      k = fence.end + 1;
+      continue;
+    }
+    if (isNestedStart(bodyLines[k]!)) {
+      flushPlain();
+      let e = k + 1;
+      while (e < bodyLines.length && /^>\s?/.test(bodyLines[e]!)) e += 1;
+      inner.push(convertCallouts(bodyLines.slice(k, e).join('\n'), entries, sourcePath));
+      k = e;
+      continue;
+    }
+    plain.push(bodyLines[k]!);
+    k += 1;
+  }
+  flushPlain();
+  if (heading) inner.unshift(heading);
+  return `${open}\n${inner.join('\n')}\n</callout>`;
 }
 
 /**
@@ -289,20 +356,44 @@ function convertHighlights(text: string): string {
   });
 }
 
+/**
+ * `%% … %%` コメントを削除する。fence 分割の前に本文全体へ適用し、コメントがコードブロックを
+ * またいでいても削除する（#106）。ただしコードブロック内にある `%%` は区切りとして扱わない。
+ */
 function stripComments(text: string, entries: ReportEntry[], sourcePath: string): string {
-  let count = 0;
-  const result = text.replace(/%%[\s\S]*?%%/g, () => {
-    count += 1;
-    return '';
-  });
-  if (count > 0) {
-    entries.push({
-      category: 'downgraded',
-      path: sourcePath,
-      message: `Obsidianコメントを${count}件削除しました`,
-    });
+  const lines = text.split('\n');
+  const inFence = new Array<boolean>(lines.length).fill(false);
+  for (const r of findFenceRanges(lines)) for (let i = r.start; i <= r.end; i += 1) inFence[i] = true;
+
+  const markers: number[] = [];
+  let offset = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (!inFence[i]) {
+      // インラインコード内の `%%` は区切りにしない（長さを保ったまま伏せ字にして探す）
+      const masked = line.replace(/``[^`\n]+(?:`[^`\n]+)*``|`[^`\n]+`/g, (m) => ' '.repeat(m.length));
+      let idx = masked.indexOf('%%');
+      while (idx !== -1) {
+        markers.push(offset + idx);
+        idx = masked.indexOf('%%', idx + 2);
+      }
+    }
+    offset += line.length + 1;
   }
-  return result;
+
+  let count = 0;
+  let out = '';
+  let last = 0;
+  for (let k = 0; k + 1 < markers.length; k += 2) {
+    out += text.slice(last, markers[k]!);
+    last = markers[k + 1]! + 2;
+    count += 1;
+  }
+  out += text.slice(last);
+  if (count > 0) {
+    entries.push({ category: 'downgraded', path: sourcePath, message: `Obsidianコメントを${count}件削除しました` });
+  }
+  return out;
 }
 
 function expandFootnotes(text: string, entries: ReportEntry[], sourcePath: string): string {
@@ -590,13 +681,25 @@ export function convertNote(content: string, ctx: ConverterContext): ConvertNote
   };
 }
 
+/** リンク・添付・ハイライト・脚注などのインライン変換（インラインコード内は対象外、#79） */
+function convertInline(text: string, ctx: ConverterContext, acc: ConversionAccumulator): string {
+  const { text: withoutInlineCode, restore } = protectInlineCode(text);
+  let t = withoutInlineCode;
+  t = convertWikiLinks(t, ctx, acc);
+  t = convertMarkdownLinksAndImages(t, ctx, acc.entries, acc.pendingLinks, acc.pendingFiles);
+  t = convertHighlights(t);
+  t = expandFootnotes(t, acc.entries, ctx.sourcePath);
+  return restore(t);
+}
+
 /** convertNote の本体。インライン展開（#80）で埋め込み先ノートにも再帰的に適用される */
 function convertBody(content: string, ctx: ConverterContext, acc: ConversionAccumulator): string {
   const { entries } = acc;
   if (content.includes(ESCAPE_TARGET)) acc.needsEscapeRestore = true;
   const escaped = content.includes(ESCAPE_TARGET) ? content.split(ESCAPE_TARGET).join(ESCAPE_SENTINEL) : content;
 
-  const segments = splitCodeFences(escaped);
+  // コメント除去は fence 分割の前に本文全体へ（コードブロックをまたぐコメントも消す、#106）
+  const segments = splitCodeFences(stripComments(escaped, entries, ctx.sourcePath));
   const converted = segments.map((seg) => {
     if (seg.type === 'code') {
       if (seg.lang === 'dataview' || seg.lang === 'dataviewjs') {
@@ -608,19 +711,15 @@ function convertBody(content: string, ctx: ConverterContext, acc: ConversionAccu
       }
       return seg.content; // mermaid含め、コードブロックは常にそのまま保持
     }
-    // インラインコード（`...`）の中身は変換対象外（docs/questions.md §7、#79）。
-    // 先に退避して各変換を通した後で戻す。fenced code block と同じ扱い。
-    const { text: withoutInlineCode, restore } = protectInlineCode(seg.content);
-    let t = withoutInlineCode;
+    let t = seg.content;
     t = normalizeHeadingDepth(t, entries, ctx.sourcePath);
     t = normalizeTaskStates(t, entries, ctx.sourcePath);
     t = convertCallouts(t, entries, ctx.sourcePath);
-    t = convertWikiLinks(t, ctx, acc);
-    t = convertMarkdownLinksAndImages(t, ctx, entries, acc.pendingLinks, acc.pendingFiles);
-    t = convertHighlights(t);
-    t = stripComments(t, entries, ctx.sourcePath);
-    t = expandFootnotes(t, entries, ctx.sourcePath);
-    return restore(t);
+    // callout 本文から取り出されたコードブロック（`> ```` → ```` ````）は変換対象外にする（#104）。
+    // 再度 fence で分割し、テキスト部分だけにインライン変換を適用する
+    return splitCodeFences(t)
+      .map((sub) => (sub.type === 'code' ? sub.content : convertInline(sub.content, ctx, acc)))
+      .join('');
   });
 
   return converted.join('');
