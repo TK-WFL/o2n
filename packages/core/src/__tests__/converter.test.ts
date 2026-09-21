@@ -414,3 +414,29 @@ describe('コードブロックをまたぐコメント（#106）', () => {
     expect(r.pendingLinks.map((l) => l.displayText)).toEqual(['C']);
   });
 });
+
+describe('md形式リンクの取りこぼし（#109）', () => {
+  it('[x](note.md#見出し) は解決され、見出し部分はページ先頭リンクに降格として報告される', () => {
+    const r = convertNote('[x](Note%20B.md#h1)', ctx());
+    expect(r.markdown).toBe('⟦o2n-link-0⟧');
+    expect(r.pendingLinks[0]).toMatchObject({ targetPath: 'Target.md', displayText: 'x' });
+    expect(r.entries.some((e) => e.category === 'downgraded' && e.message.includes('見出しリンク'))).toBe(true);
+  });
+
+  it('拡張子は大文字小文字を区別しない（Note.MD）', () => {
+    expect(convertNote('[x](Note.MD)', ctx()).pendingLinks).toHaveLength(1);
+  });
+
+  it('埋め込みでない添付リンク [資料](files/a.pdf) もアップロード対象になる', () => {
+    const r = convertNote('[資料](files/a.png) と [外部](https://x/a.pdf) と [メール](mailto:a@b.c)', ctx());
+    expect(r.pendingFiles).toHaveLength(1);
+    expect(r.pendingFiles[0]?.targetPath).toBe('Attachments/image.png');
+    expect(r.markdown).toBe('⟦o2n-file-0⟧ と [外部](https://x/a.pdf) と [メール](mailto:a@b.c)');
+  });
+
+  it('解決できない添付リンクは warning、その他の拡張子（.txt 等）はそのまま', () => {
+    const r = convertNote('[x](a.pdf) [y](memo.txt)', { ...ctx(), resolveAttachment: () => null });
+    expect(r.entries.some((e) => e.category === 'warning' && e.message.includes('a.pdf'))).toBe(true);
+    expect(r.markdown).toContain('[y](memo.txt)');
+  });
+});

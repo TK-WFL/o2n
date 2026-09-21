@@ -645,10 +645,29 @@ function convertMarkdownLinksAndImages(
     return placeholder;
   });
 
-  result = result.replace(MD_LINK_RE, (raw, text_, url) => {
-    if (/^https?:\/\//i.test(url) || url.startsWith('#')) return raw; // 外部URL/ページ内アンカーはそのまま
-    if (!url.endsWith('.md')) return raw; // md形式内部リンクのみ対象
-    const decoded = decodeURIComponent(url);
+  result = result.replace(MD_LINK_RE, (raw, text_: string, url: string) => {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('#')) return raw; // 外部URL（スキーム付き）/ページ内アンカーはそのまま
+    // `note.md#見出し` の見出し部分は Notion のページ先頭リンクに降格する（wikilink の見出しリンクと同じ扱い、#109）
+    const hashIdx = url.indexOf('#');
+    const pathPart = hashIdx === -1 ? url : url.slice(0, hashIdx);
+    const decoded = decodeURIComponent(pathPart);
+    const ext = decoded.includes('.') ? decoded.split('.').pop()!.toLowerCase() : '';
+
+    if (ATTACHMENT_EXTENSIONS.has(ext)) {
+      // 埋め込みではない添付へのリンク `[資料](files/a.pdf)` もアップロードしてファイルブロックにする（#109）
+      const resolved = ctx.resolveAttachment(decoded) ?? ctx.resolveAttachment(path.posix.basename(decoded));
+      const placeholder = makeFilePlaceholder();
+      pendingFiles.push({ placeholder, targetPath: resolved, fallbackText: raw });
+      if (!resolved) {
+        entries.push({ category: 'warning', path: ctx.sourcePath, message: `添付ファイル "${decoded}" が見つかりませんでした` });
+      }
+      return placeholder;
+    }
+
+    if (ext !== 'md') return raw; // md形式内部リンクのみ対象（拡張子は大文字小文字を区別しない）
+    if (hashIdx !== -1) {
+      entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `見出しリンク "${raw}" はページ先頭リンクに降格しました` });
+    }
     const resolved = ctx.resolveNoteLink(decoded) ?? ctx.resolveNoteLink(path.posix.basename(decoded));
     const placeholder = makeLinkPlaceholder();
     pendingLinks.push({ placeholder, targetPath: resolved, fallbackText: raw, displayText: text_ });
