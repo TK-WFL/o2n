@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildAliasIndex, buildNameIndex, resolveByFilename, resolveNoteLink } from './scanner.js';
 import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext, type EmbedMode } from './converter.js';
-import { NotionApiError, NotionBlockLimitError, type NotionApi, type NotionBlock, type UpdateContentItem } from './notion-client.js';
+import { NotionApiError, NotionBlockLimitError, type NotionApi, type NotionBlock, type PageCover, type PageIcon, type UpdateContentItem } from './notion-client.js';
 import type { StateStore } from './state.js';
 import { contentHash, isNoteUpToDate } from './state.js';
 import { createDatabaseForFolder, buildRowProperties } from './notion-db.js';
@@ -266,9 +266,22 @@ async function runPass1(
       }
       parent = { type: 'data_source_id', data_source_id: container.dataSourceId };
     } else {
-      markdown = buildFrontmatterMetaCallout(note.frontmatter) + converted.markdown;
+      markdown = converted.markdown; // メタ callout は装飾の判定後に付ける（下記）
       properties = { title: buildTitleProperty(title) };
       parent = { page_id: container.id };
+    }
+
+    // frontmatter の icon / cover（banner）をページのアイコン・カバーに反映する（#113）。
+    // 反映できたキーはメタ callout から除き、解釈できない値（Iconize のアイコン名等）はそのまま残す
+    const decoration = dryRun ? {} : await resolvePageDecoration(api, inventory, note, vaultPath, report);
+    if (!(container.kind === 'database' && container.dataSourceId)) {
+      const omit = new Set<string>();
+      if (decoration.icon) omit.add('icon');
+      if (decoration.cover) {
+        omit.add('cover');
+        omit.add('banner');
+      }
+      markdown = buildFrontmatterMetaCallout(note.frontmatter, omit) + converted.markdown;
     }
 
     const chunks = splitMarkdownForPayload(markdown, {
@@ -301,7 +314,7 @@ async function runPass1(
         // 子ページ/DB を含むページの replace_content は Notion 側が validation_error にする
         // （allow_deleting_content を付けない）ため、その場合は警告して state を据え置く
         try {
-          await api.updatePageProperties(existing.pageId, properties);
+          await api.updatePageProperties(existing.pageId, properties, decoration);
           await api.updatePageMarkdown(existing.pageId, { type: 'replace_content', replace_content: { new_str: chunks[0] ?? '' } });
           for (const chunk of chunks.slice(1)) {
             await api.updatePageMarkdown(existing.pageId, { type: 'insert_content', insert_content: { content: chunk, position: { type: 'end' } } });
@@ -322,6 +335,9 @@ async function runPass1(
       }
 
       const page = await api.createPageMarkdown({ parent, markdown: chunks[0], properties });
+      // 実ワークスペース確認（2026-09-21）: POST /pages（markdown）に cover を同梱しても反映されない
+      // ケースがあったため、装飾は作成後に PATCH /pages/:id で別途適用する
+      if (decoration.icon || decoration.cover) await api.updatePageProperties(page.id, {}, decoration);
       for (const chunk of chunks.slice(1)) {
         await api.updatePageMarkdown(
           page.id,
@@ -435,6 +451,69 @@ async function sendWithRetry(api: NotionApi, uploadId: string, buildForm: () => 
     }
     throw err;
   }
+}
+
+const EMOJI_ONLY_RE = /^\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*$/u;
+
+/**
+ * frontmatter の `icon`（絵文字 or 画像URL/vault内画像）と `cover` / `banner`（画像URL/vault内画像）を
+ * Notion のページ装飾に変換する（#113）。vault 内の画像は File Upload API でアップロードする。
+ * Iconize プラグインのアイコン名（`LiCoffee` 等）のように解釈できない値は無視して callout に残す。
+ */
+async function resolvePageDecoration(
+  api: NotionApi,
+  inventory: VaultInventory,
+  note: NoteRecord,
+  vaultPath: string,
+  report: ReportEntry[],
+): Promise<{ icon?: PageIcon; cover?: PageCover }> {
+  const out: { icon?: PageIcon; cover?: PageCover } = {};
+  const fm = note.frontmatter;
+  const { fileIndex } = indexesFor(inventory);
+
+  const asImage = async (raw: unknown, kind: 'icon' | 'cover'): Promise<PageIcon | PageCover | undefined> => {
+    if (typeof raw !== 'string') return undefined;
+    const value = raw.trim().replace(/^!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/, '$1');
+    if (/^https?:\/\//i.test(value)) return { type: 'external', external: { url: value } };
+    // 本文から参照されていない画像は添付索引に無いので、vault ルート／ノートのフォルダからの相対パスも試す
+    const candidates = [
+      resolveByFilename(value, note.path, fileIndex).resolved,
+      value.replace(/^\/+/, ''),
+      path.posix.join(path.posix.dirname(note.path), value),
+    ].filter((c): c is string => typeof c === 'string' && c.length > 0 && !c.includes('..'));
+    let resolved: string | undefined;
+    for (const c of candidates) {
+      try {
+        const st = await fs.stat(path.join(vaultPath, c));
+        if (st.isFile()) {
+          resolved = c;
+          break;
+        }
+      } catch {
+        // 次の候補へ
+      }
+    }
+    if (!resolved) return undefined;
+    try {
+      const absPath = path.join(vaultPath, resolved);
+      const stat = await fs.stat(absPath);
+      const id = await uploadFile(api, absPath, stat.size, false);
+      return { type: 'file_upload', file_upload: { id } };
+    } catch (err) {
+      report.push({ category: 'warning', path: note.path, message: `${kind} 画像 "${value}" のアップロードに失敗: ${String(err)}` });
+      return undefined;
+    }
+  };
+
+  if (typeof fm.icon === 'string' && EMOJI_ONLY_RE.test(fm.icon.trim())) {
+    out.icon = { type: 'emoji', emoji: fm.icon.trim() };
+  } else {
+    const icon = await asImage(fm.icon, 'icon');
+    if (icon) out.icon = icon;
+  }
+  const cover = (await asImage(fm.cover, 'cover')) ?? (await asImage(fm.banner, 'cover'));
+  if (cover && cover.type !== 'emoji') out.cover = cover;
+  return out;
 }
 
 async function uploadFile(

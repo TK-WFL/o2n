@@ -52,3 +52,26 @@ describe('ノート編集後の resume（#105）', () => {
     expect(report.some((e) => e.category === 'warning' && e.message.includes('ページ更新に失敗'))).toBe(true);
   });
 });
+
+describe('frontmatter の icon / cover（#113）', () => {
+  it('絵文字 icon・URL cover・vault 内画像 cover がページ装飾として PATCH され、メタ callout から除かれる', async () => {
+    await fs.writeFile(path.join(tmpDir, 'pic.png'), Buffer.from([1]));
+    await fs.writeFile(path.join(tmpDir, 'D1.md'), '---\nicon: 🚀\ncover: "![[pic.png]]"\ntags: [x]\n---\n# D1\n');
+    await fs.writeFile(path.join(tmpDir, 'D2.md'), '---\nicon: https://x/i.png\nbanner: https://x/b.jpg\n---\n# D2\n');
+    await fs.writeFile(path.join(tmpDir, 'D3.md'), '---\nicon: LiCoffee\n---\n# D3\n');
+    const mock = createMockServer();
+    const { inventory, plan, api, state } = await setupMigration(tmpDir, mock.fetchImpl);
+    await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+
+    const patchFor = (name: string) => mock.calls.find((c) => c.method === 'PATCH' && c.path === `/pages/${state.getNote(name)!.pageId}`)?.body as { icon?: unknown; cover?: unknown } | undefined;
+    expect(patchFor('D1.md')).toMatchObject({ icon: { type: 'emoji', emoji: '🚀' }, cover: { type: 'file_upload' } });
+    expect(patchFor('D2.md')).toMatchObject({ icon: { type: 'external', external: { url: 'https://x/i.png' } }, cover: { type: 'external', external: { url: 'https://x/b.jpg' } } });
+    expect(patchFor('D3.md')).toBeUndefined();
+
+    const created = (name: string) => String((mock.calls.find((c) => c.method === 'POST' && c.path === '/pages' && String((c.body as { markdown?: string }).markdown).includes(`# ${name}`))!.body as { markdown: string }).markdown);
+    expect(created('D1')).toContain('tags: x');
+    expect(created('D1')).not.toContain('icon:');
+    expect(created('D1')).not.toContain('cover:');
+    expect(created('D3')).toContain('icon: LiCoffee');
+  });
+});

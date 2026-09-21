@@ -8,8 +8,12 @@ export function buildTitleProperty(text: string): { title: Array<{ text: { conte
 /**
  * §7.1 page_treeモード: frontmatterをページ本文冒頭のcalloutとして保持する
  */
-export function buildFrontmatterMetaCallout(frontmatter: Record<string, unknown>): string {
-  const keys = Object.keys(frontmatter);
+/** Obsidian 内部用でメタ callout に出しても意味が無いキー */
+export const META_CALLOUT_OMIT_KEYS = new Set(['cssclasses', 'cssclass', 'excalidraw-plugin']);
+
+/** @param omit 追加で除くキー（ページのアイコン/カバーとして反映済みの icon/cover/banner 等、#113） */
+export function buildFrontmatterMetaCallout(frontmatter: Record<string, unknown>, omit: ReadonlySet<string> = new Set()): string {
+  const keys = Object.keys(frontmatter).filter((k) => !META_CALLOUT_OMIT_KEYS.has(k) && !omit.has(k));
   if (keys.length === 0) return '';
   const lines = keys.map((k) => {
     const v = frontmatter[k];

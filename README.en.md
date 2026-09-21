@@ -105,6 +105,7 @@ vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
 
 - Wikilinks (`[[note]]`, display text, heading links, etc.) → Notion page-to-page links; `[[alias]]` matching a note's frontmatter `aliases` resolves to that note
 - Frontmatter → in-page metadata (page-tree mode) or database properties (database mode)
+- Frontmatter `icon` (emoji, image URL or vault image) and `cover`/`banner` (image URL or vault image) → Notion page icon and cover
 - Images, PDFs, and other attachments → uploaded and shown in their original position
 - Obsidian callouts → Notion callouts (all 13 official types and their aliases mapped to icon/color; unknown types fall back to gray and are reported)
 - Highlights (`==text==`, including Obsidian 1.14 color highlights such as `==🔴text==`) → native Notion highlight with the matching color

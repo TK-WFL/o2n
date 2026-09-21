@@ -145,6 +145,10 @@ export function createMockServer() {
       return new Response(null, { status: 204 });
     }
 
+    if (method === 'GET' && /^\/pages\/[^/]+$/.test(p)) {
+      return jsonResponse({ id: p.split('/')[2], in_trash: false });
+    }
+
     if (method === 'POST' && p === '/file_uploads') {
       return jsonResponse({ id: 'file-upload-1', upload_url: 'https://upload.example/1' });
     }

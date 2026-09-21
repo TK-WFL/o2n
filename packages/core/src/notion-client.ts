@@ -229,7 +229,17 @@ export interface CreatePageMarkdownParams {
   parent: { page_id: string } | { type: 'data_source_id'; data_source_id: string };
   markdown?: string;
   properties?: Record<string, unknown>;
+  icon?: PageIcon;
+  cover?: PageCover;
 }
+
+export type PageIcon =
+  | { type: 'emoji'; emoji: string }
+  | { type: 'external'; external: { url: string } }
+  | { type: 'file_upload'; file_upload: { id: string } };
+export type PageCover =
+  | { type: 'external'; external: { url: string } }
+  | { type: 'file_upload'; file_upload: { id: string } };
 
 export interface UpdateContentItem {
   old_str: string;
@@ -272,8 +282,12 @@ export class NotionApi {
   }
 
   /** ページのプロパティ（タイトル・DB行の値）を更新する。本文は updatePageMarkdown を使う */
-  async updatePageProperties(pageId: string, properties: Record<string, unknown>): Promise<{ id: string; url: string }> {
-    return this.client.request({ method: 'PATCH', path: `/pages/${pageId}`, body: { properties } });
+  async updatePageProperties(
+    pageId: string,
+    properties: Record<string, unknown>,
+    extra: { icon?: PageIcon; cover?: PageCover } = {},
+  ): Promise<{ id: string; url: string }> {
+    return this.client.request({ method: 'PATCH', path: `/pages/${pageId}`, body: { properties, ...extra } });
   }
 
   async getPage(pageId: string): Promise<{ id: string; in_trash?: boolean; url?: string }> {
