@@ -82,7 +82,7 @@ async function walk(dir: string, root: string, out: string[]): Promise<void> {
 // （除外前は `]]` で閉じない `[` の大量反復で二次オーダーのバックトラックが起き、
 // scanコマンドが1ノートあたり20秒以上かかっていた）。
 // Obsidianはファイル名に `[` `]` を使えないため、正当なwikilinkの解釈は変わらない。
-const WIKILINK_RE = /(!?)\[\[([^[\]|#]+)(?:#(\^?[^[\]|]+))?(?:\|([^[\]|]+))?\]\]/g;
+const WIKILINK_RE = /(!?)\[\[([^[\]|#]+)(?:#(\^?[^[\]|]+))?(?:\|([^[\]]*))?\]\]/g;
 
 interface ParsedWikiLink {
   isEmbed: boolean;
@@ -96,9 +96,11 @@ interface ParsedWikiLink {
 function parseWikiLinks(content: string): ParsedWikiLink[] {
   const results: ParsedWikiLink[] = [];
   for (const m of content.matchAll(WIKILINK_RE)) {
-    const [raw, bang, targetRaw, anchor, alias] = m;
+    const [raw, bang, targetRaw, anchor, aliasRaw] = m;
     const isEmbed = bang === '!';
-    const target = (targetRaw ?? '').trim();
+    // converter.ts と同じ扱い: 表内の `\|` エスケープと複数パイプ（alt|幅）に対応
+    const alias = aliasRaw === undefined ? undefined : (aliasRaw.split('|').map((s) => s.replace(/\\$/, '').trim()).filter((s) => !/^\d+(x\d+)?$/.test(s)).join('|') || undefined);
+    const target = (targetRaw ?? '').replace(/\\$/, '').trim();
     let heading: string | undefined;
     let blockId: string | undefined;
     if (anchor) {

@@ -19,6 +19,22 @@ describe('convertNote §6 変換表', () => {
     expect(result.pendingLinks[0]?.displayText).toBe('Note B');
   });
 
+  it('![[img.png|alt|300]]（alt＋幅指定）も添付として扱い、幅は捨てる（#103）', () => {
+    for (const src of ['![[pic.png|300]]', '![[pic.png|alt text|300]]', '![[pic.png|300x200]]', '![[pic.png|alt|]]']) {
+      const r = convertNote(src, ctx());
+      expect(r.markdown).toBe('⟦o2n-file-0⟧');
+      expect(r.pendingFiles[0]?.targetPath).toBe('Attachments/image.png');
+    }
+  });
+
+  it('[[ノート|表示|名]] の複数パイプは表示名にまとめ、表内の [[T\\|alias]] はエスケープを除く', () => {
+    expect(convertNote('[[Note B|表示|名]]', ctx()).pendingLinks[0]?.displayText).toBe('表示|名');
+    const r = convertNote('| [[Note B\\|alias]] |', ctx());
+    expect(r.markdown).toBe('| ⟦o2n-link-0⟧ |');
+    expect(r.pendingLinks[0]?.displayText).toBe('alias');
+    expect(convertNote('[[Note B\\|]]', ctx()).pendingLinks[0]?.displayText).toBe('Note B');
+  });
+
   it('[[ノート｜表示名]] は表示名を保持する', () => {
     const result = convertNote('[[Note B|表示名]]', ctx());
     expect(result.pendingLinks[0]?.displayText).toBe('表示名');
@@ -326,6 +342,16 @@ describe('インラインコード/タスク正規化のReDoS耐性（#79）', (
       ('- [/] x\n').repeat(20_000),
     ];
     for (const evil of inputs) {
+      const started = Date.now();
+      convertNote(evil, ctx());
+      expect(Date.now() - started).toBeLessThan(1_000);
+    }
+  });
+});
+
+describe('複数パイプ許容後の ReDoS 耐性（#103）', () => {
+  it('パイプの大量反復でも短時間で終える', () => {
+    for (const evil of ['[[a' + '|'.repeat(50_000), '![[a.png' + '|x'.repeat(30_000), '[[' + 'a|'.repeat(30_000) + ']']) {
       const started = Date.now();
       convertNote(evil, ctx());
       expect(Date.now() - started).toBeLessThan(1_000);

@@ -345,7 +345,7 @@ function makeFilePlaceholder(): string {
 // 50,000文字程度で約10秒かかっていた（除外後は同入力で0ms）。
 // Obsidianはファイル名に `[` `]` を使えないため、正当なwikilinkの解釈は変わらない。
 // alias側から `|` を除外しているのも同じ理由（aliasに `|` は現れない）。
-const WIKILINK_RE = /(!?)\[\[([^[\]|#]+)(?:#(\^?[^[\]|]+))?(?:\|([^[\]|]+))?\]\]/g;
+const WIKILINK_RE = /(!?)\[\[([^[\]|#]+)(?:#(\^?[^[\]|]+))?(?:\|([^[\]]*))?\]\]/g;
 
 const ATTACHMENT_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp',
@@ -450,9 +450,15 @@ function inlineEmbed(
 
 function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAccumulator): string {
   const { entries, pendingLinks, pendingFiles } = acc;
-  return text.replace(WIKILINK_RE, (raw, bang, targetRaw, anchor, alias) => {
+  return text.replace(WIKILINK_RE, (raw, bang, targetRaw: string, anchor, aliasRaw: string | undefined) => {
     const isEmbed = bang === '!';
-    const target = targetRaw.trim();
+    // 表のセル内では Obsidian は `[[T\|alias]]` とパイプをエスケープする。正規表現は `\` を
+    // target 末尾として拾うので取り除く
+    const target = targetRaw.replace(/\\$/, '').trim();
+    // alias 部は複数のパイプを含みうる（`![[img.png|alt|300]]` の alt＋幅指定 #103）。
+    // 添付では末尾の数値（幅）や `WxH` を捨て、残りを alt とする。ノートリンクでは全体を表示名にする
+    const aliasParts = (aliasRaw ?? '').split('|').map((s) => s.replace(/\\$/, '').trim());
+    const alias = aliasRaw === undefined ? undefined : aliasParts.filter((s) => !/^\d+(x\d+)?$/.test(s)).join('|') || undefined;
     const ext = target.includes('.') ? target.split('.').pop()!.toLowerCase() : '';
 
     if (isEmbed && ATTACHMENT_EXTENSIONS.has(ext)) {
