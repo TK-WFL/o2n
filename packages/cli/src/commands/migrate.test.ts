@@ -38,3 +38,24 @@ describe('migrateCommand plan read', () => {
     expect(exitCode).toBe(2);
   });
 });
+
+describe('migrateCommand dry-run（#110）', () => {
+  it('dry-run は plan.json を上書きせず、レポートを report.dry-run.md に書く', async () => {
+    const { buildPlan, scanVault } = await import('@tk_wfl/o2n-core');
+    const inventory = await scanVault(vaultPath);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const planPath = path.join(testRoot, 'plan.json');
+    await fs.writeFile(planPath, JSON.stringify(plan));
+    await fs.mkdir(path.join(vaultPath, '.o2n'), { recursive: true });
+    await fs.writeFile(path.join(vaultPath, '.o2n', 'report.md'), 'PREVIOUS REAL RUN');
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    const exitCode = await migrateCommand(vaultPath, { plan: planPath, dryRun: true });
+
+    expect(exitCode).toBe(0);
+    expect(await fs.readFile(path.join(vaultPath, '.o2n', 'report.md'), 'utf-8')).toBe('PREVIOUS REAL RUN');
+    expect(await fs.readFile(path.join(vaultPath, '.o2n', 'report.dry-run.md'), 'utf-8')).toContain('# Migration Report');
+    await expect(fs.access(path.join(vaultPath, '.o2n', 'plan.json'))).rejects.toThrow();
+  });
+});

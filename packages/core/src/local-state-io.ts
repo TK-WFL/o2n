@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { FileHandle } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 
-export type VaultStateFileName = 'plan.json' | 'report.md' | 'state.json';
+export type VaultStateFileName = 'plan.json' | 'report.md' | 'report.dry-run.md' | 'state.json';
 export type HomeStateFileName = 'credentials.json' | 'state-signing-key';
 
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;

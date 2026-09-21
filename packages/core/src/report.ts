@@ -3,8 +3,13 @@ import { stateDir } from './state.js';
 import type { MigrationReport, ReportEntry, StateFile } from './types.js';
 import { atomicWriteVaultStateFile } from './local-state-io.js';
 
-export function reportPath(vaultPath: string): string {
-  return path.join(stateDir(vaultPath), 'report.md');
+/** dry-run のレポートは別ファイルに書き、本番のレポートを上書きしない（#110） */
+export function reportFileName(dryRun = false): 'report.md' | 'report.dry-run.md' {
+  return dryRun ? 'report.dry-run.md' : 'report.md';
+}
+
+export function reportPath(vaultPath: string, dryRun = false): string {
+  return path.join(stateDir(vaultPath), reportFileName(dryRun));
 }
 
 const CATEGORY_LABEL: Record<ReportEntry['category'], string> = {
@@ -52,10 +57,6 @@ export function renderReportMarkdown(report: MigrationReport, state: StateFile):
   return lines.join('\n');
 }
 
-export async function writeReport(vaultPath: string, report: MigrationReport, state: StateFile): Promise<void> {
-  await atomicWriteVaultStateFile(
-    vaultPath,
-    'report.md',
-    renderReportMarkdown(report, state),
-  );
+export async function writeReport(vaultPath: string, report: MigrationReport, state: StateFile, dryRun = false): Promise<void> {
+  await atomicWriteVaultStateFile(vaultPath, reportFileName(dryRun), renderReportMarkdown(report, state));
 }

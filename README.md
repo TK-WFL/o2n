@@ -76,7 +76,7 @@ npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionページID>
 #   --embed-mode inline を付けると ![[ノート]] の埋め込みを本文にインライン展開する（既定はリンクに降格）
 
 # 3. 移行実行（--dry-run でシミュレーションのみ、書き込みAPIを呼ばない）
-npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
+npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run   # 結果は .o2n/report.dry-run.md（本番の report.md は上書きしない）
 npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
 
 # 4. 中断からの再開（同じコマンドで冪等に完了まで進む）

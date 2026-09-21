@@ -16,6 +16,7 @@ import {
   type MigrationPlan,
   type ReportEntry,
   rateLimitFromEnv,
+  reportPath,
 } from '@tk_wfl/o2n-core';
 import { getToken } from '../token.js';
 
@@ -42,8 +43,10 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   }
   if (opts.parent) plan.parentPageId = opts.parent;
 
-  // resumeで使えるよう vault内にも計画を保存する
-  await atomicWriteVaultStateFile(vaultPath, 'plan.json', JSON.stringify(plan, null, 2));
+  // resumeで使えるよう vault内にも計画を保存する（dry-run は前回の本番計画を上書きしない、#110）
+  if (!dryRun) {
+    await atomicWriteVaultStateFile(vaultPath, 'plan.json', JSON.stringify(plan, null, 2));
+  }
 
   const token = await getToken(dryRun);
   const inventory = await scanVault(vaultPath);
@@ -76,11 +79,11 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   process.stdout.write('\n');
 
   const report = buildReport(state.snapshot, entries);
-  await writeReport(vaultPath, report, state.snapshot);
+  await writeReport(vaultPath, report, state.snapshot, dryRun);
 
   const failedCount = Object.values(state.snapshot.notes).filter((n) => n.status === 'failed').length;
   console.log(`\n成功: ${report.successCount}件 / 失敗: ${failedCount}件`);
-  console.log(`レポート: ${path.join(vaultPath, '.o2n', 'report.md')}`);
+  console.log(`レポート: ${reportPath(vaultPath, dryRun)}`);
   if (wasAbortedByBlockLimit(entries)) {
     const aborted = entries.find((e) => e.category === 'aborted');
     console.error(`\n⚠ ${aborted?.message ?? '移行を中断しました'}`);
