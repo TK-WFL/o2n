@@ -79,6 +79,26 @@ function indexesFor(inventory: VaultInventory): ResolverIndexes {
   return idx;
 }
 
+/**
+ * ノート本文の変換結果を inventory ごとにキャッシュする（#111）。Pass1/2/3 が同じノートを
+ * 3回変換していたのを1回にする。プレースホルダー番号も3パスで確実に一致する。
+ */
+const conversionCache = new WeakMap<VaultInventory, Map<string, ReturnType<typeof convertNote>>>();
+
+function convertCached(inventory: VaultInventory, note: NoteRecord, embedMode: EmbedMode | undefined): ReturnType<typeof convertNote> {
+  let cache = conversionCache.get(inventory);
+  if (!cache) {
+    cache = new Map();
+    conversionCache.set(inventory, cache);
+  }
+  const key = `${embedMode ?? 'link'}\u0000${note.path}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const result = convertNote(note.content, buildResolvers(inventory, note.path, embedMode));
+  cache.set(key, result);
+  return result;
+}
+
 function buildResolvers(inventory: VaultInventory, sourcePath: string, embedMode: EmbedMode = 'link'): ConverterContext {
   const { noteIndex, aliasIndex, fileIndex } = indexesFor(inventory);
   const ctx: ConverterContext = {
@@ -213,8 +233,7 @@ async function runPass1(
     const folder = folderOf(note.path);
     const container = containers.get(folder) ?? { kind: 'page' as const, id: plan.parentPageId };
 
-    const ctx = buildResolvers(inventory, note.path, plan.embedMode);
-    const converted = convertNote(note.content, ctx);
+    const converted = convertCached(inventory, note, plan.embedMode);
     report.push(...converted.entries);
     if (note.excalidraw) {
       report.push({
@@ -332,8 +351,7 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
     const noteState = state.getNote(note.path);
     if (!noteState || noteState.status !== 'created' || !noteState.pageId) continue;
 
-    const ctx = buildResolvers(inventory, note.path, plan.embedMode);
-    const reconverted = convertNote(note.content, ctx);
+    const reconverted = convertCached(inventory, note, plan.embedMode);
 
     const updates: UpdateContentItem[] = [];
     for (const link of reconverted.pendingLinks) {
@@ -565,8 +583,7 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
     // （一度'done'になったノートをPass3が二度と見に行かないと、失敗した添付が永遠に直らない）
     if (!noteState || !noteState.pageId || (noteState.status !== 'linked' && noteState.status !== 'done')) continue;
 
-    const ctx = buildResolvers(inventory, note.path, plan.embedMode);
-    const reconverted = convertNote(note.content, ctx);
+    const reconverted = convertCached(inventory, note, plan.embedMode);
 
     if (reconverted.pendingFiles.length === 0) {
       await state.setNote(note.path, { ...noteState, status: 'done' });
@@ -696,10 +713,12 @@ export async function runMigration(opts: MigratorOptions): Promise<ReportEntry[]
     // Pass2（リンク解決）は既存ページの本文更新なので続行できるが、Pass3（添付ブロック挿入）は
     // ブロック作成のため同じ上限に当たる。中断として報告し、resume で再開できる状態で返す
     report.push({ category: 'aborted', path: '', message: err.message });
+    await opts.state.flush();
     return report;
   }
   await runPass2(opts, report);
   await runPass3(opts, report);
+  await opts.state.flush();
   return report;
 }
 

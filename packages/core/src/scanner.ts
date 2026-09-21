@@ -62,6 +62,22 @@ function parseNoteMatter(raw: string, notePath: string): ReturnType<typeof matte
   return matter(raw);
 }
 
+const pathCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+/** ディレクトリ階層ごとに名前順で比較する（同じフォルダ内のファイルはファイル名順、フォルダはフォルダ名順） */
+export function compareVaultPaths(a: string, b: string): number {
+  const as = a.split('/');
+  const bs = b.split('/');
+  const n = Math.min(as.length, bs.length);
+  for (let i = 0; i < n; i += 1) {
+    const aLast = i === as.length - 1;
+    const bLast = i === bs.length - 1;
+    if (aLast !== bLast) return aLast ? -1 : 1; // 同じ階層ではファイルをフォルダより先に
+    const c = pathCollator.compare(as[i]!, bs[i]!);
+    if (c !== 0) return c;
+  }
+  return as.length - bs.length;
+}
+
 async function walk(dir: string, root: string, out: string[]): Promise<void> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -259,6 +275,9 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
   const allFiles: string[] = [];
   await walk(vaultPath, vaultPath, allFiles);
 
+  // 並び順を vault の名前順（数字は数値として比較）に固定する（#112）。readdir の順序は
+  // ファイルシステム依存で、Notion は作成順に子ページを並べるため、ここで決めた順が Notion 上の順になる
+  allFiles.sort(compareVaultPaths);
   const mdPaths = allFiles.filter((p) => p.endsWith('.md'));
   const nameIndex = buildNameIndex(mdPaths);
   // 添付の名前索引はvault全体で一度だけ作る（以前はリンクごとに再構築していて大規模vaultで O(リンク数×ファイル数) だった）

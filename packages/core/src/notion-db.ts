@@ -139,7 +139,9 @@ function renderPropertyValue(
       return { value: { date: { start } } };
     }
     case 'multi_select': {
-      const names = (Array.isArray(value) ? value : [value]).map((v) => stringify(v));
+      // Obsidian は `tags: a, b` のようなカンマ区切り文字列も複数タグとして扱う（#114）
+      const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [value];
+      const names = raw.map((v) => stringify(v).trim()).filter((v) => v.length > 0);
       const { kept, overflow } = splitMultiSelectOverflow(names, MULTI_SELECT_MAX_OPTIONS);
       const prop = { multi_select: kept.map((name) => ({ name })) };
       return overflow.length > 0

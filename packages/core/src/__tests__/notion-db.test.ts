@@ -133,3 +133,10 @@ describe('buildRowProperties: Notion の値上限（#67）', () => {
     }
   });
 });
+
+describe('tags の文字列（#114）', () => {
+  it('"a, b" は 2 つの選択肢になり、空要素は捨てる', () => {
+    const { properties } = buildRowProperties({ tags: 'a, b,, c ' }, [mapping('tags', 'multi_select')], 't');
+    expect(properties.tags).toEqual({ multi_select: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] });
+  });
+});
