@@ -114,3 +114,19 @@ describe('deepVerifyNotes（#81）', () => {
     expect(progress).toEqual(['A.md', 'B.md']);
   });
 });
+
+describe('vault から削除されたノート（#115）', () => {
+  it('summarizeState は state にあって vault に無いノートを orphaned に挙げる（skipped は除く）', () => {
+    const s = summarizeState(
+      stateWith({ 'a.md': { status: 'done', pageId: 'p1', pageUrl: 'u' }, 'gone.md': { status: 'done', pageId: 'p2' }, 'sk.md': { status: 'skipped' } }),
+      inventoryWith(['a.md']),
+    );
+    expect(s.orphaned).toEqual([{ path: 'gone.md', pageId: 'p2', pageUrl: undefined }]);
+  });
+
+  it('deepVerifyNotes は orphaned のページが残っていれば page_orphaned、ゴミ箱/404 なら報告しない', async () => {
+    const { api } = mockApi({ p2: 'still here', p3: { trash: true }, p4: 404 });
+    const result = await deepVerifyNotes(api, stateWith({}), { orphaned: [{ path: 'g2.md', pageId: 'p2' }, { path: 'g3.md', pageId: 'p3' }, { path: 'g4.md', pageId: 'p4' }] });
+    expect(result.issues).toEqual([expect.objectContaining({ path: 'g2.md', kind: 'page_orphaned' })]);
+  });
+});

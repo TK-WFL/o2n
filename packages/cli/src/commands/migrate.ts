@@ -64,6 +64,8 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   console.log(dryRun ? '[dry-run] 移行を開始します（書き込みAPIは呼ばれません）' : '移行を開始します');
   const total = inventory.notes.length;
 
+  const startedAt = Date.now();
+  const before = Object.fromEntries(Object.entries(state.snapshot.notes).map(([p, n]) => [p, n.status]));
   const entries: ReportEntry[] = await runMigration({
     vaultPath,
     plan,
@@ -78,7 +80,7 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   });
   process.stdout.write('\n');
 
-  const report = buildReport(state.snapshot, entries);
+  const report = buildReport(state.snapshot, entries, { startedAt, finishedAt: Date.now(), apiCalls: api.callCount, dryRun, before });
   await writeReport(vaultPath, report, state.snapshot, dryRun);
 
   const failedCount = Object.values(state.snapshot.notes).filter((n) => n.status === 'failed').length;
