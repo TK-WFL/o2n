@@ -245,3 +245,27 @@ gray-matter(js-yaml)は無引用のYYYY-MM-DD等をDate型としてパースす�
   埋め込みのインライン展開と見出しセクション展開（#80）はいずれも期待通り
 - DBモード（#67）: `DatabaseFolder` の3行が `data_source_id` 親で作成され、`FrontmatterAllTypes.md` の
   2000字超 `longtext` を含むノートもエラーなく作成される
+
+## 21. `<callout>` は複数行形式でコードブロック・ネストした callout を子ブロックとして持てる（実ワークスペースで検証済み、2026-09-21）
+
+**該当**: `packages/core/src/converter.ts` `renderCallout`（#104, #110）
+
+§16 では「callout 内の改行は `<br>` にする」としていたが、これは1行形式の話。次のように
+`<callout …>` と `</callout>` を別行にし、間に改行区切りで段落・コードブロック・`<callout>` を
+置くと、それぞれ callout の子ブロック（paragraph / code / callout）として保存される。
+
+```
+<callout icon="💡" color="blue_bg">
+**タイトル**<br>前の行
+```js
+const x = 1;
+```
+後の行
+</callout>
+```
+
+o2n はプレーンな本文だけの callout は従来の1行形式、コードブロックやネストした callout を
+含む場合だけこの複数行形式を使う。合わせて、fence 検出は `>` で始まる行を対象外にし
+（callout 本文の `> ```` を通常のコードブロックと誤認して callout が途中で閉じていた）、
+`%% … %%` コメントの除去は fence 分割の前に本文全体へ行うようにした（コードブロックを
+またぐコメントが公開されていた、#106）。

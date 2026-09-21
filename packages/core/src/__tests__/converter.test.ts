@@ -358,3 +358,59 @@ describe('複数パイプ許容後の ReDoS 耐性（#103）', () => {
     }
   });
 });
+
+describe('callout 内のコードブロックとネスト（#104, #110）', () => {
+  it('callout 内のコードブロックは複数行形式の callout の子として保持され、後続行も callout に残る', () => {
+    const r = convertNote('> [!note] T\n> 前\n> ```js\n> const a = 1;\n>\n> const b = 2;\n> ```\n> 後\n\n外', ctx());
+    expect(r.markdown).toBe(
+      '<callout icon="💡" color="blue_bg">\n**T**\n前\n```js\nconst a = 1;\n\nconst b = 2;\n```\n後\n</callout>\n\n外',
+    );
+  });
+
+  it('callout 内のコードブロック内の [[x]] は変換されない', () => {
+    const r = convertNote('> [!note]\n> ```\n> [[Not Link]]\n> ```', ctx());
+    expect(r.pendingLinks).toHaveLength(0);
+    expect(r.markdown).toContain('[[Not Link]]');
+  });
+
+  it('ネストした callout は内側も callout として再帰変換される', () => {
+    const r = convertNote('> [!warning] 外\n> > [!tip] 内\n> > 本文\n> 続き', ctx());
+    expect(r.markdown).toBe(
+      '<callout icon="⚠️" color="orange_bg">\n**外**\n<callout icon="🔥" color="green_bg">**内**<br>本文</callout>\n続き\n</callout>',
+    );
+  });
+
+  it('折りたたみ callout の本文にコードがある場合も details 内で複数行形式になる', () => {
+    const r = convertNote('> [!note]- F\n> ```\n> x\n> ```', ctx());
+    expect(r.markdown).toBe('<details>\n<summary>**F**</summary>\n<callout icon="💡" color="blue_bg">\n```\nx\n```\n</callout>\n</details>');
+  });
+
+  it('引用ブロック内の ``` は通常のコードブロックとして扱わない（callout の外側は影響なし）', () => {
+    const r = convertNote('> ```\n> [[Q]]\n> ```\n\n[[R]]', ctx());
+    // 引用内の fence は fence として扱われないため [[Q]] も変換される（Obsidian の引用内コードは非対応）
+    expect(r.pendingLinks.map((l) => l.displayText)).toEqual(['Q', 'R']);
+  });
+});
+
+describe('コードブロックをまたぐコメント（#106）', () => {
+  it('%% の中にコードブロックがあっても削除される', () => {
+    const r = convertNote('前\n%%\n```\ncode\n```\n%%\n後', ctx());
+    expect(r.markdown).toBe('前\n\n後');
+    expect(r.entries.some((e) => e.message.includes('コメントを1件削除'))).toBe(true);
+  });
+
+  it('コードブロック内の %% は区切りにならない', () => {
+    const src = '```\na %% b %% c\n```\n%%x%%';
+    expect(convertNote(src, ctx()).markdown).toBe('```\na %% b %% c\n```\n');
+  });
+
+  it('閉じていない %% は削除しない', () => {
+    expect(convertNote('a %% b', ctx()).markdown).toBe('a %% b');
+  });
+
+  it('~~~ フェンスと ```` の入れ子も fence として扱う', () => {
+    const src = '~~~\n[[A]]\n~~~\n````md\n```\n[[B]]\n```\n````\n[[C]]';
+    const r = convertNote(src, ctx());
+    expect(r.pendingLinks.map((l) => l.displayText)).toEqual(['C']);
+  });
+});
