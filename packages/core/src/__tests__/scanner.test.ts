@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
-import { buildAliasIndex, buildNameIndex, resolveNoteLink, scanVault, UnsupportedFrontmatterLanguageError } from '../scanner.js';
+import { buildAliasIndex, buildNameIndex, resolveNoteLink, scanVault } from '../scanner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VAULT = path.resolve(__dirname, '../../../../fixtures/test-vault');
@@ -107,8 +107,10 @@ describe('scanVault frontmatterガード（セキュリティ）', () => {
         `---${language}\n${marker}()\n---\n本文`,
       );
 
-      await expect(scanVault(vaultDir)).rejects.toBeInstanceOf(UnsupportedFrontmatterLanguageError);
+      const inv = await scanVault(vaultDir);
       expect(executed).toBe(false);
+      expect(inv.notes).toEqual([]);
+      expect(inv.skipped).toEqual([{ path: 'Evil.md', reason: expect.stringContaining('YAML 以外') }]);
     } finally {
       delete (globalThis as Record<string, unknown>)[marker];
       await fs.rm(vaultDir, { recursive: true, force: true });
@@ -275,5 +277,52 @@ describe('wikilink 解析の複数パイプ（#103）', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('スキャンの堅牢化と大文字小文字非依存の解決（#107, #108）', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-scan-robust-'));
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('.git / node_modules / 隠しディレクトリ内の .md は走査しない', async () => {
+    for (const d of ['.git', 'node_modules/pkg', '.hidden', 'Docs']) await fs.mkdir(path.join(dir, d), { recursive: true });
+    for (const f of ['.git/README.md', 'node_modules/pkg/README.md', '.hidden/x.md', 'Docs/ok.md']) await fs.writeFile(path.join(dir, f), '# x');
+    const inv = await scanVault(dir);
+    expect(inv.notes.map((n) => n.path)).toEqual(['Docs/ok.md']);
+  });
+
+  it('[[note]] は大文字小文字が違っても解決され、完全一致があればそちらを優先する', async () => {
+    await fs.writeFile(path.join(dir, 'Note.md'), 'x');
+    await fs.writeFile(path.join(dir, 'A.md'), '[[note]] [[NOTE.md]]');
+    const inv = await scanVault(dir);
+    const idx = buildNameIndex(inv.notes.map((n) => n.path));
+    expect(resolveNoteLink('note', 'A.md', idx, new Map()).resolved).toBe('Note.md');
+    expect(resolveNoteLink('NOTE.md', 'A.md', idx, new Map()).resolved).toBe('Note.md');
+    const idx2 = buildNameIndex(['Note.md', 'note.md']);
+    expect(resolveNoteLink('note', 'A.md', idx2, new Map()).resolved).toBe('note.md');
+    expect(resolveNoteLink('Note', 'A.md', idx2, new Map()).resolved).toBe('Note.md');
+  });
+
+  it('alias も大文字小文字非依存', () => {
+    const aliases = buildAliasIndex([{ path: 'P.md', frontmatter: { aliases: ['Project Alpha'] } }]);
+    expect(resolveNoteLink('project alpha', 'A.md', new Map(), aliases).resolved).toBe('P.md');
+  });
+
+  it('同名ノートが同じ距離に複数ある曖昧なリンクは scan 時に ambiguous 警告として1件だけ報告される', async () => {
+    await fs.mkdir(path.join(dir, 'X'), { recursive: true });
+    await fs.mkdir(path.join(dir, 'Y'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'X', 'Same.md'), 'x');
+    await fs.writeFile(path.join(dir, 'Y', 'Same.md'), 'y');
+    await fs.writeFile(path.join(dir, 'Root.md'), '[[Same]] and again [[Same]]');
+    const inv = await scanVault(dir);
+    const amb = inv.warnings.filter((w) => w.reason === 'ambiguous');
+    expect(amb).toHaveLength(1);
+    expect(amb[0]).toMatchObject({ sourcePath: 'Root.md', linkText: 'Same' });
+    expect(amb[0]?.candidates?.sort()).toEqual(['X/Same.md', 'Y/Same.md']);
   });
 });
