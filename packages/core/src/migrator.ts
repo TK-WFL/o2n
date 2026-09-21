@@ -276,6 +276,32 @@ async function runPass1(
         continue;
       }
 
+      if (existing?.pageId && existing.status !== 'failed') {
+        // 既存ページがあり本文が変わった（resume 時にノートを編集していた）: 新規作成せず
+        // 同じページを更新する（#105）。従来は別ページを作って旧ページが孤立していた。
+        // 子ページ/DB を含むページの replace_content は Notion 側が validation_error にする
+        // （allow_deleting_content を付けない）ため、その場合は警告して state を据え置く
+        try {
+          await api.updatePageProperties(existing.pageId, properties);
+          await api.updatePageMarkdown(existing.pageId, { type: 'replace_content', replace_content: { new_str: chunks[0] ?? '' } });
+          for (const chunk of chunks.slice(1)) {
+            await api.updatePageMarkdown(existing.pageId, { type: 'insert_content', insert_content: { content: chunk, position: { type: 'end' } } });
+          }
+        } catch (err) {
+          if (err instanceof NotionBlockLimitError) throw err;
+          report.push({ category: 'warning', path: note.path, message: `変更されたノートのページ更新に失敗したため前回の内容のまま残しました: ${String(err)}` });
+          done += 1;
+          onProgress?.(done, total, note.path);
+          continue;
+        }
+        // 添付・リンクは新しい本文のプレースホルダーに対して Pass2/3 で再解決する
+        await state.setNote(note.path, { status: 'created', pageId: existing.pageId, pageUrl: existing.pageUrl, contentHash: hash });
+        report.push({ category: 'downgraded', path: note.path, message: '前回の移行後に変更されたため、Notion 上の同じページの本文を置き換えました' });
+        done += 1;
+        onProgress?.(done, total, note.path);
+        continue;
+      }
+
       const page = await api.createPageMarkdown({ parent, markdown: chunks[0], properties });
       for (const chunk of chunks.slice(1)) {
         await api.updatePageMarkdown(

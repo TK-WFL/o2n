@@ -22,6 +22,7 @@ export function createMockServer() {
   let blockLimitAfterCreates: number | null = null;
   let createCount = 0;
   let failNextLinkPatchWith400 = false;
+  let failMarkdownPatchType: string | null = null;
   let failNextFileSendWith400 = false;
   let alwaysFailFileSend = false;
 
@@ -94,7 +95,13 @@ export function createMockServer() {
     }
 
     if (method === 'PATCH' && /\/pages\/.+\/markdown$/.test(p)) {
+      if (failMarkdownPatchType && (body as { type?: string })?.type === failMarkdownPatchType) {
+        return new Response(JSON.stringify({ code: 'validation_error', message: 'would delete child pages' }), { status: 400 });
+      }
       return jsonResponse({});
+    }
+    if (method === 'PATCH' && /^\/pages\/[^/]+$/.test(p)) {
+      return jsonResponse({ id: p.split('/')[2], url: `https://www.notion.so/${p.split('/')[2]}` });
     }
 
     if (method === 'POST' && p === '/databases') {
@@ -155,6 +162,8 @@ export function createMockServer() {
     triggerNextLinkPatch400: () => { failNextLinkPatchWith400 = true; },
     setAlwaysFailFileSend: (v: boolean) => { alwaysFailFileSend = v; },
     setChildrenPageSize: (n: number) => { childrenPageSize = n; },
+    /** 指定 type の PATCH .../markdown を常に 400 にする */
+    failMarkdownPatchOfType: (t: string | null) => { failMarkdownPatchType = t; },
     /** 指定回数のブロック作成成功後に Free プランのブロック上限 403 を返し始める（null で解除） */
     setBlockLimitAfterCreates: (n: number | null) => { blockLimitAfterCreates = n; createCount = 0; },
     /** テストからページのブロック構造を直接差し替える（ネスト構造の再現用） */
