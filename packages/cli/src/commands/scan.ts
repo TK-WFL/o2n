@@ -1,7 +1,30 @@
 import { blockLimitWarning, estimateBlockCount, scanVault } from '@tk_wfl/o2n-core';
 
-export async function scanCommand(vaultPath: string, opts: { verbose?: boolean }): Promise<void> {
+export async function scanCommand(vaultPath: string, opts: { verbose?: boolean; json?: boolean }): Promise<void> {
   const inventory = await scanVault(vaultPath);
+
+  if (opts.json) {
+    const estimated = estimateBlockCount(inventory);
+    console.log(
+      JSON.stringify(
+        {
+          vaultPath: inventory.vaultPath,
+          noteCount: inventory.notes.length,
+          attachmentCount: inventory.attachments.length,
+          wikiLinkCount: inventory.wikiLinks.length,
+          estimatedBlocks: estimated,
+          blockLimitWarning: blockLimitWarning(estimated),
+          folders: Object.fromEntries(Object.entries(inventory.folderTree).map(([k, v]) => [k || '(root)', v.length])),
+          frontmatterKeyStats: inventory.frontmatterKeyStats,
+          skipped: inventory.skipped,
+          warnings: inventory.warnings,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
 
   console.log(`vault: ${inventory.vaultPath}`);
   console.log(`ノート数: ${inventory.notes.length}`);

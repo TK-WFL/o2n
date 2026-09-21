@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { scanCommand } from './commands/scan.js';
 import { planCommand, PlanInputRequiredError } from './commands/plan.js';
+import { describeError } from './errors.js';
 import { migrateCommand } from './commands/migrate.js';
 import { resumeCommand } from './commands/resume.js';
 import { verifyCommand } from './commands/verify.js';
@@ -43,7 +44,8 @@ program
   .description('vaultを走査してインベントリを表示する（読み取りのみ）')
   .argument('<vaultPath>', 'Obsidian vaultのパス')
   .option('--verbose', '詳細ログを表示')
-  .action(async (vaultPath: string, opts: { verbose?: boolean }) => {
+  .option('--json', '結果を JSON で出力する')
+  .action(async (vaultPath: string, opts: { verbose?: boolean; json?: boolean }) => {
     await scanCommand(vaultPath, opts);
   });
 
@@ -77,11 +79,12 @@ program
   .command('migrate')
   .description('移行を実行する')
   .argument('<vaultPath>', 'Obsidian vaultのパス')
-  .requiredOption('--plan <path>', '計画ファイルのパス')
+  .option('--plan <path>', '計画ファイルのパス（省略時は <vaultPath>/.o2n/plan.json）')
   .option('--parent <pageId>', '移行先のNotion親ページID（計画ファイルの値を上書き）')
   .option('--dry-run', '書き込みAPIを呼ばずに計画のみ出力する')
   .option('--verbose', '詳細ログを表示')
-  .action(async (vaultPath: string, opts: { plan: string; parent?: string; dryRun?: boolean; verbose?: boolean }) => {
+  .option('--quiet', '進捗表示を抑え、結果の要約だけを出す')
+  .action(async (vaultPath: string, opts: { plan?: string; parent?: string; dryRun?: boolean; verbose?: boolean; quiet?: boolean }) => {
     const code = await migrateCommand(vaultPath, opts);
     process.exitCode = code;
   });
@@ -91,7 +94,8 @@ program
   .description('中断した移行を再開する')
   .argument('<vaultPath>', 'Obsidian vaultのパス')
   .option('--verbose', '詳細ログを表示')
-  .action(async (vaultPath: string, opts: { verbose?: boolean }) => {
+  .option('--quiet', '進捗表示を抑え、結果の要約だけを出す')
+  .action(async (vaultPath: string, opts: { verbose?: boolean; quiet?: boolean }) => {
     const code = await resumeCommand(vaultPath, opts);
     process.exitCode = code;
   });
@@ -101,7 +105,8 @@ program
   .description('移行後検証（件数照合・未解決リンク数）。--deep で Notion の実ページと照合する')
   .argument('<vaultPath>', 'Obsidian vaultのパス')
   .option('--deep', 'Notion の実ページを取得し、ページの存在・プレースホルダー残り・添付数を照合する（読み取りのみ）')
-  .action(async (vaultPath: string, opts: { deep?: boolean }) => {
+  .option('--json', '結果を JSON で出力する')
+  .action(async (vaultPath: string, opts: { deep?: boolean; json?: boolean }) => {
     const code = await verifyCommand(vaultPath, opts);
     process.exitCode = code;
   });
@@ -116,6 +121,6 @@ program
   });
 
 program.parseAsync(process.argv).catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
+  console.error(`エラー: ${describeError(err)}`);
   process.exitCode = 2;
 });

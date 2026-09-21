@@ -59,3 +59,26 @@ describe('migrateCommand dry-run（#110）', () => {
     await expect(fs.access(path.join(vaultPath, '.o2n', 'plan.json'))).rejects.toThrow();
   });
 });
+
+describe('migrateCommand --plan 省略（#116）', () => {
+  it('plan.json が無ければ plan コマンドの案内付きで終了コード 2', async () => {
+    const errors: string[] = [];
+    (console.error as unknown as { mockImplementation: (f: (...a: unknown[]) => void) => void }).mockImplementation((...a) => errors.push(a.join(' ')));
+    const exitCode = await migrateCommand(vaultPath, { dryRun: true });
+    expect(exitCode).toBe(2);
+    expect(errors.join('\n')).toContain('o2n plan');
+  });
+
+  it('--quiet では進捗を出さない（非TTYでも 10% ごとの行が出ない）', async () => {
+    const { progressPrinter } = await import('./migrate.js');
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...a) => { logs.push(a.join(' ')); });
+    const quiet = progressPrinter(true);
+    for (let i = 1; i <= 20; i += 1) quiet(i, 20, 'n');
+    expect(logs).toHaveLength(0);
+    const loud = progressPrinter(false);
+    for (let i = 1; i <= 20; i += 1) loud(i, 20, 'n');
+    spy.mockRestore();
+    if (!process.stdout.isTTY) expect(logs.length).toBeLessThanOrEqual(11);
+  });
+});

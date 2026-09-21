@@ -75,9 +75,9 @@ npx @tk_wfl/o2n-cli scan <vaultPath>
 npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionPageId>
 #   add --embed-mode inline to expand ![[note]] embeds in place (default: downgrade to a link)
 
-# 3. Run the migration (--dry-run simulates without calling any write API)
-npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run
-npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
+# 3. Run the migration (--dry-run simulates without calling any write API; --plan defaults to <vaultPath>/.o2n/plan.json)
+npx @tk_wfl/o2n-cli migrate <vaultPath> --dry-run
+npx @tk_wfl/o2n-cli migrate <vaultPath>        # --quiet suppresses progress output
 
 # 4. Resume an interrupted migration (idempotent, same command runs to completion)
 npx @tk_wfl/o2n-cli resume <vaultPath>
@@ -85,7 +85,7 @@ npx @tk_wfl/o2n-cli resume <vaultPath>
 # 5. Verify and inspect the report
 npx @tk_wfl/o2n-cli verify <vaultPath>
 # --deep also fetches the real Notion pages and checks existence/trash, leftover placeholders and attachment counts (read-only)
-npx @tk_wfl/o2n-cli verify <vaultPath> --deep
+npx @tk_wfl/o2n-cli verify <vaultPath> --deep   # --json for machine-readable output (scan too)
 npx @tk_wfl/o2n-cli report <vaultPath>
 ```
 
