@@ -1,180 +1,223 @@
+<div align="center">
+
 # o2n
+
+**Obsidian → Notion migration tool**
+
+Move an entire vault to Notion while keeping links, folder hierarchy, frontmatter and attachments intact.
+
+[![npm](https://img.shields.io/npm/v/@tk_wfl/o2n-cli?label=o2n-cli&color=cb3837&logo=npm)](https://www.npmjs.com/package/@tk_wfl/o2n-cli)
+[![npm](https://img.shields.io/npm/v/@tk_wfl/o2n-mcp-server?label=o2n-mcp-server&color=cb3837&logo=npm)](https://www.npmjs.com/package/@tk_wfl/o2n-mcp-server)
+[![CI](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml/badge.svg)](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)
 
 English | [日本語](README.md)
 
-A tool that migrates an Obsidian vault into a Notion workspace while preserving folder structure,
-note-to-note links (wikilinks), frontmatter, and attachments. Usable from both a CLI and an MCP
-server (for Claude Desktop / Claude Code).
+</div>
 
-- Repository: https://github.com/TK-WFL/o2n
-- License: [MIT](LICENSE)
+---
 
-## Install
+## 🤔 Why o2n?
 
-```bash
-# CLI
-npx @tk_wfl/o2n-cli scan <vaultPath>
-# or install globally
-npm install -g @tk_wfl/o2n-cli
-```
+Notion's built-in import does not understand Obsidian-specific syntax, so the bigger the vault, the less realistic manual clean-up becomes. o2n **analyzes the whole vault first and then converts it into Notion's data model**.
 
-The MCP server is a separate package (`@tk_wfl/o2n-mcp-server`). Point Claude Desktop's / Claude
-Code's config at `npx -y @tk_wfl/o2n-mcp-server` as the launch command.
+| Obsidian syntax | Built-in import | o2n |
+|---|:---:|:---:|
+| `[[note]]` wikilinks | ❌ plain text | ✅ page-to-page links (same-name notes and `aliases` resolved) |
+| `![[image.png]]` attachments | ❌ not shown | ✅ uploaded and placed where they were |
+| frontmatter | ❌ raw text | ✅ page metadata or **database properties** |
+| `icon` / `cover` | ❌ | ✅ page icon and cover |
+| `> [!note]` callouts | ❌ plain quote | ✅ all 13 types with color/icon, foldable ones become toggles |
+| `==highlight==` | ❌ | ✅ colored highlights (Obsidian 1.14) |
+| folder hierarchy | ⚠️ often flattened | ✅ reproduced as a page tree |
+| failure midway | 🔁 start over | ✅ `resume` continues (no duplicates) |
+| unconvertible content | 🤫 silently lost | ✅ listed in the report |
 
-Requires Node.js 20+.
+---
 
-## CLI usage
+## 🚀 Get started in 3 minutes
 
-### Connecting to Notion (three ways)
+### 1. Get a Notion token
 
-In every case the token is passed through the `NOTION_TOKEN` env var (never as a CLI argument, to
-avoid leaking it into shell history). `NOTION_TOKEN` takes priority over a stored login if both exist.
-
-**Option A: personal access token (PAT) — recommended, simplest**
-
-In Notion's [developer portal → Personal access tokens](https://www.notion.so/developers/tokens)
-select "New token", pick a name, the Notion API capability and an expiration (7 days to 1 year),
-copy the token (it is shown only once) and set it:
+In the [Notion developer portal → Personal access tokens](https://www.notion.so/developers/tokens) select **New token**, pick a name and an expiration, and copy the token (it is shown only once).
 
 ```bash
 export NOTION_TOKEN=ntn_xxx
 ```
 
+> 💡 With a **personal access token (PAT)** there is no per-page "Connect" step, and the Free-plan block limit (see below) does not apply. Other options: [Connecting to Notion](#-connecting-to-notion).
+
+### 2. Make a plan
+
+```bash
+npx @tk_wfl/o2n-cli plan <vaultPath> --parent <destination Notion page ID>
+```
+
+For each folder you choose "page tree" or "database" interactively (folders with consistent frontmatter are suggested as databases automatically).
+
+### 3. Try it, then migrate
+
+```bash
+npx @tk_wfl/o2n-cli migrate <vaultPath> --dry-run   # simulate without writing
+npx @tk_wfl/o2n-cli migrate <vaultPath>             # for real
+npx @tk_wfl/o2n-cli verify  <vaultPath> --deep      # compare against the real Notion pages
+```
+
+If it stops halfway, `npx @tk_wfl/o2n-cli resume <vaultPath>` continues where it left off.
+
+> 🧑‍💻 **Not comfortable with the command line?** Register o2n as an MCP server in Claude Code / Claude Desktop and just say "migrate this vault to Notion" → [Using as an MCP server](#-using-as-an-mcp-server)
+
+---
+
+## 📖 Commands
+
+| Command | What it does | Main options |
+|---|---|---|
+| `scan <vault>` | Scan the vault and print counts and an estimated block count (no Notion access) | `--verbose` `--json` |
+| `plan <vault>` | Create the migration plan (`.o2n/plan.json`) interactively | `--parent <id>` `--yes` `--embed-mode inline` `--out <path>` |
+| `migrate <vault>` | Migrate according to the plan | `--dry-run` `--plan <path>` `--quiet` `--verbose` |
+| `resume <vault>` | Continue an interrupted or failed migration (idempotent) | `--quiet` |
+| `verify <vault>` | Reconcile state with the vault; `--deep` also checks the real Notion pages | `--deep` `--json` |
+| `report <vault>` | Show the latest report (`.o2n/report.md`) | |
+
+- `migrate --dry-run` writes its report to `.o2n/report.dry-run.md` and never overwrites the real `report.md`
+- `--embed-mode inline`: expand `![[note]]` embeds in place instead of linking (`![[note#heading]]` expands only that section)
+- Exit codes: `0` all succeeded / `1` some failed or mismatched / `2` fatal error
+
+---
+
+## 🔑 Connecting to Notion
+
+The token is always passed through the `NOTION_TOKEN` env var (never as a CLI argument — avoids leaking it into shell history).
+
+<details>
+<summary><b>Option A: personal access token (PAT) — recommended</b></summary>
+
+In the [developer portal → Personal access tokens](https://www.notion.so/developers/tokens) select **New token**, pick a name, the Notion API capability and an expiration (7 days to 1 year).
+
 - Writes with your own permissions, so **no per-page "Connect" step is needed**
 - Expiring, and workspace admins can list and revoke it
-- Not subject to the Notion Free plan block limit (see below)
+- Not subject to the Notion Free plan block limit
 - Added in May 2026; older workspace settings expose it under the "Connections" tab
 
-**Option B: internal integration token**
+</details>
 
-Create a workspace-level integration and use its token (same `ntn_` format as Option A). The
-destination parent page must be **connected** to that integration (see "Commands" below).
+<details>
+<summary><b>Option B: internal integration token</b></summary>
 
-**Option C: browser login (disabled by default)**
+Create a workspace-level integration and use its token (same `ntn_` format). The destination parent page must be **connected** to that integration beforehand (page `…` menu → Connections); an unconnected page causes `404 Could not find page` at `plan` / `migrate` time.
+
+</details>
+
+<details>
+<summary><b>Option C: browser login (disabled by default)</b></summary>
 
 ```bash
 npx @tk_wfl/o2n-cli login
 ```
 
-Browser login is disabled by default because the old OAuth polling flow allowed token theft.
-Only set `O2N_ENABLE_BROWSER_LOGIN=1` when you are intentionally testing the new loopback handoff
-flow. If you used `o2n login` with an older version, revoke and re-issue the Notion token.
+Disabled by default because the old OAuth polling flow allowed token theft. Only set `O2N_ENABLE_BROWSER_LOGIN=1` when intentionally testing the new loopback handoff flow. If you used `o2n login` with an older version, revoke and re-issue the Notion token. How it works is described under "Security".
 
-### Commands
+</details>
 
-With Option B/C (internal integration / `o2n login`), the destination parent page must already be
-**connected** to that integration in Notion (page `…` menu → Connections) before running
-`plan`/`migrate`; an unconnected page causes a `404 Could not find page` error. With Option A (PAT)
-no connect step is needed for pages you can access.
+---
 
-```bash
-# 1. Scan the vault (read-only)
-npx @tk_wfl/o2n-cli scan <vaultPath>
+## 🤖 Using as an MCP server
 
-# 2. Generate a migration plan interactively (choose page-tree vs. database per folder)
-npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionPageId>
-#   add --embed-mode inline to expand ![[note]] embeds in place (default: downgrade to a link)
+Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop / Claude Code.
 
-# 3. Run the migration (--dry-run simulates without calling any write API; --plan defaults to <vaultPath>/.o2n/plan.json)
-npx @tk_wfl/o2n-cli migrate <vaultPath> --dry-run
-npx @tk_wfl/o2n-cli migrate <vaultPath>        # --quiet suppresses progress output
-
-# 4. Resume an interrupted migration (idempotent, same command runs to completion)
-npx @tk_wfl/o2n-cli resume <vaultPath>
-
-# 5. Verify and inspect the report
-npx @tk_wfl/o2n-cli verify <vaultPath>
-# --deep also fetches the real Notion pages and checks existence/trash, leftover placeholders and attachment counts (read-only)
-npx @tk_wfl/o2n-cli verify <vaultPath> --deep   # --json for machine-readable output (scan too)
-npx @tk_wfl/o2n-cli report <vaultPath>
+```json
+{
+  "mcpServers": {
+    "o2n": {
+      "command": "npx",
+      "args": ["-y", "@tk_wfl/o2n-mcp-server"],
+      "env": {
+        "NOTION_TOKEN": "ntn_xxx",
+        "O2N_ALLOWED_VAULTS": "/absolute/path/to/vault"
+      }
+    }
+  }
+}
 ```
 
-Exit codes: `0` = fully succeeded, `1` = some notes failed, `2` = fatal error.
+| Tool | Purpose |
+|---|---|
+| `scan_vault` | Scan the vault (read-only) |
+| `get_plan` / `update_plan` | Inspect / adjust the plan (`folders` / `skipList` / `embedMode`) |
+| `prepare_migration` | Freeze what will be migrated (target, destination, counts) and return a `requestId` |
+| `commit_migration` | Run the frozen request; real writes require a confirmation token |
+| `resume_migration` / `cancel_migration` | Continue / stop at a note boundary |
+| `migration_status` / `verify_migration` / `get_report` | Progress, verification, report |
 
-## MCP server usage
+🔒 **Safety by design**: vaults not listed in `O2N_ALLOWED_VAULTS` cannot be accessed. Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and `O2N_MCP_WRITE_TOKEN`, then pass the confirmation token to `commit_migration`. Failures and refusals are returned with `isError`.
 
-Register `@tk_wfl/o2n-mcp-server` as a stdio MCP server in Claude Desktop / Claude Code.
-Tools: `scan_vault` / `get_plan` / `update_plan` (accepts `embedMode`) / `prepare_migration` / `commit_migration` / `resume_migration` / `cancel_migration` / `migration_status` / `verify_migration` / `get_report`. Failures and refusals are returned with `isError`.
+---
 
-MCP access requires `O2N_ALLOWED_VAULTS=/absolute/path/to/vault` (comma-separated for multiple
-vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
-`O2N_MCP_WRITE_TOKEN`, inspect `prepare_migration`, then pass the confirmation token to
-`commit_migration`. `start_migration` is disabled for safety.
+## 🔄 What gets converted
 
-## What gets converted
+<details>
+<summary><b>Open the conversion table</b></summary>
 
-- Wikilinks (`[[note]]`, display text, heading links, etc.) → Notion page-to-page links; `[[alias]]` matching a note's frontmatter `aliases` resolves to that note
-- Frontmatter → in-page metadata (page-tree mode) or database properties (database mode)
-- Frontmatter `icon` (emoji, image URL or vault image) and `cover`/`banner` (image URL or vault image) → Notion page icon and cover
-- Images, PDFs, and other attachments → uploaded and shown in their original position
-- Obsidian callouts → Notion callouts (all 13 official types and their aliases mapped to icon/color; unknown types fall back to gray and are reported)
-- Highlights (`==text==`, including Obsidian 1.14 color highlights such as `==🔴text==`) → native Notion highlight with the matching color
-- Math (`$...$` / `$$...$$`) and mermaid code blocks → passed through as-is
-- Headings up to h4 (Notion's limit); h5/h6 are downgraded to h4 and recorded in the report
-- Tasks (`- [ ]` / `- [x]`) → Notion to-dos. Extended states such as `[/]` or `[-]` are normalized to unchecked with the original marker kept in the text (recorded in the report)
-- Inline code (`` `...` ``) and code blocks are left untouched
-- Note embeds (`![[note]]` / `![[note#heading]]`) → downgraded to a link by default. With `plan --embed-mode inline` the embedded note's body (or just that section) is expanded in place (an unsynced copy in Notion; cycles and depth > 2 fall back to a link)
-- Unsupported elements are recorded in the report: Canvas (`.canvas`), Bases (`.base`), Dataview query results, etc. Excalidraw drawing notes are migrated as their exported image (`.png`/`.svg` with the same name) when one exists, otherwise skipped
+| Obsidian | In Notion |
+|---|---|
+| `[[note]]` `[[note\|text]]` | Page links. Case-insensitive; frontmatter `aliases` are resolved too |
+| `[[note#heading]]` `[[note#^id]]` | Link to the top of the page (Notion has no heading links; recorded in the report) |
+| `![[note]]` `![[note#heading]]` | Link by default. `--embed-mode inline` expands the body (cycles and depth > 2 fall back to a link) |
+| `![[image.png\|300]]` `[doc](a.pdf)` | Uploaded and placed as image / PDF / audio / video / file blocks |
+| `[text](note.md#heading)` | Resolved like a wikilink (`.MD` too) |
+| frontmatter | page_tree: leading metadata callout / database: properties (title, rich_text, number, checkbox, date, multi_select, url) |
+| `icon` `cover` `banner` | Page icon (emoji, URL, vault image) and cover (URL, vault image) |
+| `tags` (list or `a, b`) | multi_select |
+| `> [!type]` callouts | All 13 types and aliases mapped to color/icon. `[!type]-` becomes a toggle. Code blocks and nesting are kept |
+| `==text==` `==🔴text==` | Highlight (colored highlights keep their color) |
+| `- [ ]` `- [x]` | To-do. `[/]` `[-]` etc. are normalized to unchecked with the original marker kept in the text |
+| `#` … `####` | Headings (h5/h6 are downgraded to h4 and recorded) |
+| Math `$…$` `$$…$$`, mermaid | Passed through |
+| `%% comments %%` | Removed (even across code blocks) |
+| `[^1]` footnotes | Expanded inline |
+| Inline code and code blocks | Left untouched |
+| Excalidraw notes | Migrated as the exported image (`.png` / `.svg`) when one exists, otherwise skipped |
+| `.canvas` `.base`, Dataview results | Unsupported (recorded in the report) |
 
-For each folder, if 60%+ of its direct notes share 3 or more common frontmatter keys, database mode
-is suggested automatically (the final call is always made by the user via `plan`).
+</details>
 
-## Time estimate
+If 60%+ of a folder's direct notes share 3 or more frontmatter keys, o2n **suggests turning that folder into a database** (you decide in `plan`).
 
-Roughly 1,000 notes + 500 attachments ≈ 4,000–5,000 API calls ≈ ~30–40 minutes at an effective
-rate of 2.5 req/s.
+---
 
-The default rate is 2 req/s (Notion's per-connection limit is 180 req/min on Free/Plus and
-600 req/min on Business/Enterprise). On Business or higher you can raise it with
-`O2N_REQUESTS_PER_SECOND=8` (1–10) to shorten the migration; 429 responses are honored via `Retry-After`.
+## ⏱ Time and limits
 
-## Notion Free plan block limit
+- **Estimate**: 1,000 notes + 500 attachments ≈ 4,000–5,000 API calls ≈ 30–40 minutes (default 2 req/s)
+- On Business or higher, `O2N_REQUESTS_PER_SECOND=8` (1–10) shortens the run. 429 responses are honored via `Retry-After`
+- **Notion Free plan block limit** (since September 2026): multi-member Free workspaces have a lifetime cap of 1,000 blocks that is also enforced by the API ([reference](https://developers.notion.com/reference/workspace-block-limits)). `scan` / `plan` warn up front using the estimated block count; if the limit is hit, o2n stops immediately and `resume` continues later. PATs, paid plans and single-member Free workspaces are not affected
 
-Since September 2026, **multi-member Free workspaces** have a lifetime cap of 1,000 blocks that is
-also enforced by the API ([reference](https://developers.notion.com/reference/workspace-block-limits)).
-Once reached, creation requests are rejected with `403 restricted_resource`, and deleting blocks does
-not restore capacity.
+---
 
-- `o2n scan` / `o2n plan` print an estimated block count and warn up front when it exceeds 1,000
-- If the limit is hit during migration, o2n stops immediately instead of failing note by note and
-  records it under "aborted" in the report. Notes not yet started stay untouched, so after changing
-  the plan you can continue with `o2n resume`
-- Personal access tokens (PAT), paid plans, and single-member Free workspaces are not subject to the limit
+## 🛡 Security
 
-## Repository layout
+- The token lives only in the `NOTION_TOKEN` env var or `~/.o2n/credentials.json` (mode 600)
+- The vault itself is **always read-only**; o2n writes only inside `.o2n/`
+- Only YAML frontmatter is parsed; `---js` / `---json` etc. skip just that note, safely
+- Symlinks inside the vault are never followed. `.o2n/` and `~/.o2n/` are read and written with symlink / hardlink / TOCTOU protections
+- `.o2n/state.json` is bound by signature to the vault, the plan and the Notion workspace, so mix-ups are detected
+- Hardened against ReDoS from malicious vaults
+- No network traffic other than the Notion API (no telemetry). npm packages are published via Trusted Publishing (OIDC) **with provenance**
 
-```
-packages/
-  core/          # scanner / planner / converter / migrator / state / notion / report / credentials
-  cli/           # the o2n command (thin wrapper over core)
-  mcp-server/    # stdio MCP server (thin wrapper over core)
-services/
-  auth-proxy/    # OAuth code-exchange proxy for `o2n login` (Cloudflare Worker)
-fixtures/test-vault/  # test vault covering every supported syntax
-scripts/
-  verify-release.mjs  # pre-publish npm package content/checksum verification
-docs/
-  e2e.md         # manual end-to-end test procedure
-  questions.md   # implementation decision log
-  spec.md        # security boundaries and persisted-data spec
-```
+<details>
+<summary><b>How <code>o2n login</code> (OAuth) works and its trust model</b></summary>
 
-## How `o2n login` works
+- Notion OAuth (public integrations) requires a `client_secret`, which cannot ship in a CLI. Instead `services/auth-proxy` (a Cloudflare Worker) holds the secret and only exchanges the authorization code for a token
+- In the new flow the CLI opens a temporary HTTP listener on `127.0.0.1`; after the exchange the Worker returns only a short-lived handoff code to loopback. The CLI POSTs its session secret plus the handoff code to the Worker, receives the token exactly once, and stores it in `~/.o2n/credentials.json`
+- The `client_secret` is never present in the CLI, the MCP server or this repository (Worker environment only). The Worker never touches vault or Notion page contents
+- Re-enabling it means trusting the Worker operator (TK-WFL or your own self-hosted instance). Using `NOTION_TOKEN` does not depend on that trust model. Deployment: [services/auth-proxy/README.md](services/auth-proxy/README.md)
 
-- Notion's OAuth (public integration) requires a `client_secret`, which can't be embedded in the
-  CLI. Instead, `services/auth-proxy` (a small Cloudflare Worker) holds the secret and only
-  performs the code→token exchange.
-- The old polling flow is disabled. The new flow opens a temporary listener on `127.0.0.1`; the
-  Worker exchanges the authorization code, redirects only a short-lived handoff code to loopback,
-  and the CLI exchanges that code plus a local session secret for the token exactly once. The token
-  is saved to `~/.o2n/credentials.json` (mode 600).
-- The `client_secret` never touches the CLI, the MCP server, or this repository (Worker
-  environment variable only).
-- The Worker only performs the token exchange — it never accesses vault contents or Notion pages.
+</details>
 
-See [services/auth-proxy/README.md](services/auth-proxy/README.md) for deployment steps.
+---
 
-## Development
+## 🧑‍🔧 Development
 
 ```bash
 npm install
@@ -182,26 +225,25 @@ npm run build
 npm test
 ```
 
-See [docs/questions.md](docs/questions.md) for implementation decisions and deviations from the spec.
+```
+packages/
+  core/          # scanner / planner / converter / migrator / state / notion / report
+  cli/           # the o2n command (thin wrapper over core)
+  mcp-server/    # stdio MCP server (thin wrapper over core)
+services/
+  auth-proxy/    # OAuth code-exchange proxy for `o2n login` (Cloudflare Worker)
+fixtures/test-vault/  # test vault covering every supported syntax
+scripts/verify-release.mjs  # pre-publish npm package content/checksum verification
+docs/
+  e2e.md         # manual end-to-end runbook
+  questions.md   # implementation decisions and real-workspace verification notes
+  spec.md        # security boundary and persisted-data specification
+```
 
-## Security
+Bug reports and requests go to [Issues](https://github.com/TK-WFL/o2n/issues). If some syntax converts badly, a small snippet helps a lot.
 
-- The Notion token is stored only in the `NOTION_TOKEN` env var or `~/.o2n/credentials.json`
-  (via `o2n login`, mode 600)
-- Only YAML frontmatter is supported. Non-YAML frontmatter such as `---js`, `---javascript`, and
-  `---json` is rejected before parsing.
-- `.o2n/state.json` v2 is bound to the canonical vault path, plan hash, Notion identity, and a
-  local signature.
-- The only path o2n writes to inside the vault is `.o2n/` (the vault itself is read-only)
-- Symbolic links inside the vault are never followed (prevents reading files outside the vault)
-- Files under `.o2n/` and `~/.o2n/` are read and written with symlink, hardlink, and TOCTOU
-  (swap-after-verify) protections, and kept at `0700`/`0600` permissions
-- The MCP server only reads/writes vaults whose canonical `realpath()` is listed in
-  `O2N_ALLOWED_VAULTS`
-- No network calls other than to the Notion API (no telemetry)
+<div align="center">
 
-### Trust model for `o2n login` (shared auth-proxy)
+MIT License · [TK-WFL](https://github.com/TK-WFL)
 
-`o2n login` is disabled by default. If you enable it, the TK-WFL-operated or self-hosted
-Cloudflare Worker handles Notion's `client_secret`, so you must trust that Worker operator. The
-`NOTION_TOKEN` env var path (internal integration) does not depend on this trust model at all.
+</div>

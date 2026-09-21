@@ -1,176 +1,224 @@
+<div align="center">
+
 # o2n
+
+**Obsidian → Notion 移行ツール**
+
+リンク・フォルダ階層・frontmatter・添付ファイルを保ったまま、vault をまるごと Notion へ。
+
+[![npm](https://img.shields.io/npm/v/@tk_wfl/o2n-cli?label=o2n-cli&color=cb3837&logo=npm)](https://www.npmjs.com/package/@tk_wfl/o2n-cli)
+[![npm](https://img.shields.io/npm/v/@tk_wfl/o2n-mcp-server?label=o2n-mcp-server&color=cb3837&logo=npm)](https://www.npmjs.com/package/@tk_wfl/o2n-mcp-server)
+[![CI](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml/badge.svg)](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)
 
 [English](README.en.md) | 日本語
 
-Obsidian vault を Notion ワークスペースへ、フォルダ構造・ノート間リンク（wikilink）・
-frontmatter・添付ファイルを保ったまま移行するツール。CLIとMCPサーバー（Claude Desktop / Claude Code向け）の
-両方から使える。
+</div>
 
-- リポジトリ: https://github.com/TK-WFL/o2n
-- ライセンス: [MIT](LICENSE)
+---
 
-## インストール
+## 🤔 なぜ o2n？
 
-```bash
-# CLI
-npx @tk_wfl/o2n-cli scan <vaultPath>
-# またはグローバルインストール
-npm install -g @tk_wfl/o2n-cli
-```
+Notion の標準インポートは Obsidian 特有の書き方を解釈しないため、大きな vault ほど手直しが現実的でなくなります。o2n は **vault 全体を解析してから Notion のデータ構造に変換**します。
 
-MCPサーバーは別パッケージ（`@tk_wfl/o2n-mcp-server`）。Claude Desktop / Claude Codeの設定で
-`npx -y @tk_wfl/o2n-mcp-server` を起動コマンドに指定する。
+| Obsidian の記法 | 標準インポート | o2n |
+|---|:---:|:---:|
+| `[[ノート]]` wikilink | ❌ 文字列のまま | ✅ ページ間リンク（同名ノート・`aliases` も解決） |
+| `![[画像.png]]` 添付 | ❌ 表示されない | ✅ アップロードして元の位置に表示 |
+| frontmatter | ❌ 生テキスト | ✅ メタ情報 or **データベースのプロパティ** |
+| `icon` / `cover` | ❌ | ✅ ページのアイコン・カバー |
+| `> [!note]` callout | ❌ ただの引用 | ✅ 全 13 種別を色・アイコン付きで再現、折りたたみはトグルに |
+| `==ハイライト==` | ❌ | ✅ 色付きハイライト（Obsidian 1.14 対応） |
+| フォルダ階層 | ⚠️ 崩れがち | ✅ ページ階層として再現 |
+| 途中で失敗 | 🔁 最初から | ✅ `resume` で続きから（二重作成しない） |
+| 変換できなかったもの | 🤫 黙って欠落 | ✅ レポートに一覧 |
 
-Node.js 20+ が必要。
+---
 
-## 使い方（CLI）
+## 🚀 3 分で始める
 
-### Notionとの連携（3通り）
+### 1. Notion のトークンを用意する
 
-いずれの方法でもトークンは `NOTION_TOKEN` 環境変数で渡す（コマンドライン引数では受け取らない。
-シェル履歴への漏洩防止）。`NOTION_TOKEN` が設定されていれば保存済みのログイン情報より優先される。
-
-**方法A: 個人アクセストークン（PAT）を使う（推奨・いちばん簡単）**
-
-Notionの[開発者ポータル「Personal access tokens」](https://www.notion.so/developers/tokens)で
-「New token」→ 名前・権限（Notion API）・有効期限（7日〜1年）を選んで作成し、表示されたトークンを設定する
-（トークンは作成時にしか表示されない）。
+[Notion 開発者ポータル → Personal access tokens](https://www.notion.so/developers/tokens) で **New token** → 名前・有効期限を選んで作成し、表示されたトークンを控えます（作成時にしか表示されません）。
 
 ```bash
 export NOTION_TOKEN=ntn_xxx
 ```
 
-- 作成した本人がアクセスできるページにそのまま書き込めるため、**ページごとにintegrationを接続する手順が不要**
+> 💡 **個人アクセストークン（PAT）** なら、移行先ページを integration に接続する手順が不要で、Free プランのブロック上限（後述）の対象外です。他の方法は [Notion との連携方法](#-notion-との連携方法) を参照。
+
+### 2. 計画を作る
+
+```bash
+npx @tk_wfl/o2n-cli plan <vaultのパス> --parent <移行先 Notion ページの ID>
+```
+
+フォルダごとに「ページ階層」か「データベース」かを対話で選べます（frontmatter が揃っているフォルダは自動でデータベース化を提案）。
+
+### 3. 試してから、移行する
+
+```bash
+npx @tk_wfl/o2n-cli migrate <vaultのパス> --dry-run   # 書き込まずにシミュレーション
+npx @tk_wfl/o2n-cli migrate <vaultのパス>             # 本番
+npx @tk_wfl/o2n-cli verify  <vaultのパス> --deep      # Notion の実ページと照合
+```
+
+途中で止まっても `npx @tk_wfl/o2n-cli resume <vaultのパス>` で続きから再開できます。
+
+> 🧑‍💻 **コマンドが苦手な方へ**: Claude Code / Claude Desktop に MCP サーバーとして登録すると、「この vault を Notion に移行して」と話しかけるだけで進められます → [MCP サーバーとして使う](#-mcp-サーバーとして使う)
+
+---
+
+## 📖 コマンド一覧
+
+| コマンド | 役割 | 主なオプション |
+|---|---|---|
+| `scan <vault>` | vault を走査して件数・推定ブロック数を表示（Notion にはアクセスしない） | `--verbose` `--json` |
+| `plan <vault>` | 移行計画（`.o2n/plan.json`）を対話で作成 | `--parent <id>` `--yes` `--embed-mode inline` `--out <path>` |
+| `migrate <vault>` | 計画に従って移行 | `--dry-run` `--plan <path>` `--quiet` `--verbose` |
+| `resume <vault>` | 中断・失敗した移行を続きから再開（冪等） | `--quiet` |
+| `verify <vault>` | state と vault の突き合わせ。`--deep` で Notion の実ページとも照合 | `--deep` `--json` |
+| `report <vault>` | 最新のレポート（`.o2n/report.md`）を表示 | |
+
+- `migrate --dry-run` のレポートは `.o2n/report.dry-run.md` に書かれ、本番の `report.md` を上書きしません
+- `--embed-mode inline`: `![[ノート]]` の埋め込みを、リンクではなく本文にその場で展開します（`![[ノート#見出し]]` はそのセクションのみ）
+- 終了コード: `0` 全件成功 / `1` 一部失敗・不一致あり / `2` 致命的エラー
+
+---
+
+## 🔑 Notion との連携方法
+
+トークンは常に `NOTION_TOKEN` 環境変数で渡します（コマンドライン引数では受け取りません — シェル履歴への漏洩防止）。
+
+<details>
+<summary><b>方法 A: 個人アクセストークン（PAT）— 推奨</b></summary>
+
+[開発者ポータル「Personal access tokens」](https://www.notion.so/developers/tokens) で **New token** → 名前・権限（Notion API）・有効期限（7 日〜1 年）を選んで作成。
+
+- 作成した本人がアクセスできるページにそのまま書き込めるため、**ページごとに integration を接続する手順が不要**
 - 有効期限付きで、ワークスペース管理者が一覧・失効できる
-- Notion Freeプランのブロック上限（後述）の対象外
-- 2026年5月に追加された機能。古いワークスペース設定では「Connections」タブから辿れる
+- Notion Free プランのブロック上限の対象外
+- 2026 年 5 月に追加された機能。古いワークスペース設定では「Connections」タブから辿れる
 
-**方法B: internal integrationトークンを使う**
+</details>
 
-ワークスペース単位で動かすintegrationを作り、そのトークンを設定する（方法Aと同じ `ntn_` 形式）。
-移行先の親ページをそのintegrationに**接続（Connect）**しておく必要がある（下記「コマンド一覧」参照）。
+<details>
+<summary><b>方法 B: internal integration のトークン</b></summary>
 
-**方法C: ブラウザでログイン（既定停止中）**
+ワークスペース単位で動く integration を作り、そのトークン（同じ `ntn_` 形式）を設定します。
+移行先の親ページを事前にその integration に **接続（Connect）** しておく必要があります（ページ右上の `…` → 「接続先」）。未接続のページを指定すると `plan` / `migrate` 時に `404 Could not find page` になります。
+
+</details>
+
+<details>
+<summary><b>方法 C: ブラウザでログイン（既定停止中）</b></summary>
 
 ```bash
 npx @tk_wfl/o2n-cli login
 ```
 
-旧OAuth poll方式にトークン窃取リスクが見つかったため、ブラウザログインは既定で停止している。
-検証目的で新しいloopback handoff方式を使う場合のみ、`O2N_ENABLE_BROWSER_LOGIN=1` を明示する。
-旧バージョンで `o2n login` を利用した場合は、Notion側で該当トークンを失効・再発行することを推奨する。
+旧 OAuth poll 方式にトークン窃取リスクが見つかったため、既定で停止しています。検証目的で新しい loopback handoff 方式を使う場合のみ `O2N_ENABLE_BROWSER_LOGIN=1` を明示してください。旧バージョンで `o2n login` を利用した場合は、Notion 側で該当トークンを失効・再発行することを推奨します。仕組みは「セキュリティ」節の折りたたみを参照。
 
-### コマンド一覧
+</details>
 
-方法B/C（internal integration / `o2n login`）の場合、移行先にする親ページは事前にNotion側でその
-integrationに**接続（Connect）**しておく必要がある（ページ右上の`…`→「接続先」）。未接続のページを
-指定すると、`plan`/`migrate`実行時に`404 Could not find page`エラーになる。方法A（PAT）では
-本人がアクセスできるページなら接続手順は不要。
+---
 
-```bash
-# 1. vaultを走査（読み取りのみ）
-npx @tk_wfl/o2n-cli scan <vaultPath>
+## 🤖 MCP サーバーとして使う
 
-# 2. 移行計画を対話式に生成（フォルダごとにページ階層/データベース化を選べる）
-npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionページID>
-#   --embed-mode inline を付けると ![[ノート]] の埋め込みを本文にインライン展開する（既定はリンクに降格）
+Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` を登録します。
 
-# 3. 移行実行（--dry-run でシミュレーションのみ、書き込みAPIを呼ばない。--plan 省略時は <vaultPath>/.o2n/plan.json）
-npx @tk_wfl/o2n-cli migrate <vaultPath> --dry-run   # 結果は .o2n/report.dry-run.md（本番の report.md は上書きしない）
-npx @tk_wfl/o2n-cli migrate <vaultPath>        # --quiet で進捗表示を抑制
-
-# 4. 中断からの再開（同じコマンドで冪等に完了まで進む）
-npx @tk_wfl/o2n-cli resume <vaultPath>
-
-# 5. 検証・レポート確認
-npx @tk_wfl/o2n-cli verify <vaultPath>
-# --deep を付けると Notion の実ページも取得し、ページの存在・ゴミ箱・未解決プレースホルダー・添付数を照合する（読み取りのみ）
-npx @tk_wfl/o2n-cli verify <vaultPath> --deep   # --json で機械可読出力（scan も同様）
-npx @tk_wfl/o2n-cli report <vaultPath>
+```json
+{
+  "mcpServers": {
+    "o2n": {
+      "command": "npx",
+      "args": ["-y", "@tk_wfl/o2n-mcp-server"],
+      "env": {
+        "NOTION_TOKEN": "ntn_xxx",
+        "O2N_ALLOWED_VAULTS": "/absolute/path/to/vault"
+      }
+    }
+  }
+}
 ```
 
-終了コード: `0`=全件成功 / `1`=一部failed / `2`=致命的エラー。
+| ツール | 役割 |
+|---|---|
+| `scan_vault` | vault を走査（読み取りのみ） |
+| `get_plan` / `update_plan` | 計画の確認・調整（`folders` / `skipList` / `embedMode`） |
+| `prepare_migration` | 移行内容（対象・移行先・件数）を固定して `requestId` を返す |
+| `commit_migration` | 固定した内容を実行。本実行には確認トークンが必須 |
+| `resume_migration` / `cancel_migration` | 続きから再開 / ノート境界で中断 |
+| `migration_status` / `verify_migration` / `get_report` | 進捗・検証・レポート |
 
-## 使い方（MCPサーバー）
+🔒 **安全設計**: `O2N_ALLOWED_VAULTS` に無い vault へはアクセスできません。Notion への本実行は既定で無効で、`O2N_ENABLE_MCP_WRITE=1` と `O2N_MCP_WRITE_TOKEN` を設定したうえで `commit_migration` に確認トークンを渡す必要があります。失敗・拒否の応答は `isError` 付きで返ります。
 
-Claude Desktop / Claude Code から `@tk_wfl/o2n-mcp-server` を stdio MCP サーバーとして登録する。
-ツール: `scan_vault` / `get_plan` / `update_plan`（`embedMode` も指定可）/ `prepare_migration` / `commit_migration` / `resume_migration` / `cancel_migration` / `migration_status` / `verify_migration` / `get_report`。失敗・拒否の応答は `isError` 付き。
+---
 
-MCPからvaultへアクセスするには、`O2N_ALLOWED_VAULTS=/absolute/path/to/vault` のように許可vaultを
-カンマ区切りで明示する。Notionへの本実行は既定で無効で、`O2N_ENABLE_MCP_WRITE=1` と
-`O2N_MCP_WRITE_TOKEN` を設定したうえで、`prepare_migration` の内容を確認してから
-`commit_migration` に確認トークンを渡す必要がある。`start_migration` は安全上の理由で無効化された。
+## 🔄 変換される内容
 
-## 変換される内容
+<details>
+<summary><b>対応表を開く</b></summary>
 
-- Wikilink（`[[ノート]]`、表示名、見出しリンクなど）→ Notionページ間リンク。frontmatter `aliases` に一致する `[[別名]]` もそのノートに解決
-- frontmatter → ページ内メタ情報（page_treeモード）またはデータベースのプロパティ（databaseモード）
-- frontmatter の `icon`（絵文字・画像URL・vault内画像）と `cover`/`banner`（画像URL・vault内画像）→ Notionページのアイコン・カバー
-- 画像・PDF等の添付ファイル → アップロードして元の位置に表示
-- Obsidianのcallout → Notionのcallout（Obsidian公式の全13種別＋別名を色・アイコンに対応。未知の種別はグレーで保持しレポート）
-- ハイライト（`==text==`、Obsidian 1.14 の色付きハイライト `==🔴text==` の色指定を含む）→ Notionのネイティブハイライト
-- 数式（`$...$` / `$$...$$`）、mermaidコードブロック → そのまま保持
-- 見出しは h4 まで（Notionの上限）。h5/h6 は h4 に降格しレポートに記録される
-- タスク（`- [ ]` / `- [x]`）→ NotionのTo-do。`[/]` `[-]` などの拡張状態は未完了に正規化し元の記号を本文に残す（レポートに記録）
-- インラインコード（`` `...` ``）とコードブロックの中身は変換しない
-- ノート埋め込み（`![[ノート]]` / `![[ノート#見出し]]`）→ 既定ではリンクに降格。`plan --embed-mode inline` で埋め込み先の本文（見出し指定ならそのセクション）をその場に展開する（Notion上では同期されない複製。循環と深さ3以上はリンクに降格）
-- 対応していない要素はレポートに記録される: Canvas（`.canvas`）、Bases（`.base`）、Dataviewの実行結果等。Excalidrawの図面ノートは同名の書き出し画像（`.png`/`.svg`）があればその画像として移行し、無ければスキップ
+| Obsidian | Notion での扱い |
+|---|---|
+| `[[ノート]]` `[[ノート\|表示名]]` | ページ間リンク。大文字小文字非依存、frontmatter `aliases` でも解決 |
+| `[[ノート#見出し]]` `[[ノート#^id]]` | ページ先頭へのリンク（Notion に見出しリンクが無いため。レポートに記録） |
+| `![[ノート]]` `![[ノート#見出し]]` | 既定はリンク。`--embed-mode inline` で本文を展開（循環・深さ 3 以上はリンク） |
+| `![[画像.png\|300]]` `[資料](a.pdf)` | アップロードして元の位置に画像 / PDF / 音声 / 動画 / ファイルブロック |
+| `[テキスト](note.md#見出し)` | wikilink と同じ解決（`.MD` も可） |
+| frontmatter | page_tree: 冒頭のメタ callout / database: プロパティ（title・rich_text・number・checkbox・date・multi_select・url） |
+| `icon` `cover` `banner` | ページのアイコン（絵文字・URL・vault 内画像）・カバー（URL・vault 内画像） |
+| `tags`（配列 / `a, b`） | multi_select |
+| `> [!type]` callout | 全 13 種別＋別名を色・アイコンに対応。`[!type]-` はトグル。コードブロックやネストも保持 |
+| `==text==` `==🔴text==` | ハイライト（色付きは色を反映） |
+| `- [ ]` `- [x]` | To-do。`[/]` `[-]` 等は未完了に正規化し元記号を本文に残す |
+| `#` 〜 `####` | 見出し（h5/h6 は h4 に降格しレポートに記録） |
+| 数式 `$…$` `$$…$$`、mermaid | そのまま保持 |
+| `%% コメント %%` | 削除（コードブロックをまたぐものも） |
+| `[^1]` 脚注 | 文中に展開 |
+| インラインコード・コードブロック | 中身は変換しない |
+| Excalidraw ノート | 同名の書き出し画像（`.png` / `.svg`）があれば画像として移行、無ければスキップ |
+| `.canvas` `.base`、Dataview の実行結果 | 非対応（レポートに記録） |
 
-フォルダごとに、直下ノートの60%以上が共通のfrontmatterキーを3つ以上持つ場合はデータベース化を自動提案する
-（最終判断は`plan`コマンドでユーザーが行う）。
+</details>
 
-## 所要時間の目安
+フォルダ直下のノートの 60% 以上が共通の frontmatter キーを 3 つ以上持つ場合、そのフォルダの **データベース化を自動提案**します（最終判断は `plan` で行います）。
 
-1,000ノート＋500添付 ≒ API呼び出し4,000〜5,000回 ≒ 実効2.5req/sで約30〜40分。
+---
 
-既定のレートは2req/秒（Notionの接続ごとの上限はFree/Plusで180req/分、Business/Enterpriseで600req/分）。
-Business以上のワークスペースでは `O2N_REQUESTS_PER_SECOND=8` のように1〜10の範囲で上げると移行時間を短縮できる
-（429を受けた場合は `Retry-After` に従って自動的に待つ）。
+## ⏱ 所要時間と制限
 
-## Notion Freeプランのブロック上限について
+- **目安**: 1,000 ノート＋500 添付 ≒ API 呼び出し 4,000〜5,000 回 ≒ 約 30〜40 分（既定 2 req/秒）
+- Business プラン以上なら `O2N_REQUESTS_PER_SECOND=8`（1〜10）で短縮できます。429 は `Retry-After` に従って自動で待ちます
+- **Notion Free プランのブロック上限**（2026 年 9 月〜）: 複数メンバーの Free ワークスペースは生涯 1,000 ブロックが API にも適用されます（[公式リファレンス](https://developers.notion.com/reference/workspace-block-limits)）。`scan` / `plan` が推定ブロック数で事前警告し、上限に達した場合は即座に中断して `resume` で再開できます。PAT・有料プラン・メンバー 1 人の Free は対象外です
 
-2026年9月から、**複数メンバーのFreeワークスペース**は生涯1,000ブロックの上限がAPIにも適用される
-（[公式リファレンス](https://developers.notion.com/reference/workspace-block-limits)）。
-上限に達すると作成系のリクエストが `403 restricted_resource` で拒否され、ブロックを削除しても枠は戻らない。
+---
 
-- `o2n scan` / `o2n plan` は推定ブロック数を表示し、1,000を超える場合は事前に警告する
-- 移行中に上限へ達した場合は、残りのノートに無駄なリクエストを送らず即座に中断し、レポートの「中断」に記録する。
-  中断時点のノートは未着手のまま残るため、プラン変更後に `o2n resume` で続きから再開できる
-- 個人アクセストークン（PAT）、有料プラン、メンバー1人のFreeワークスペースはこの上限の対象外
+## 🛡 セキュリティ
 
-## リポジトリ構成
+- トークンは環境変数 `NOTION_TOKEN` か `~/.o2n/credentials.json`（パーミッション 600）にのみ保存
+- vault 本体は **常に読み取り専用**。書き込むのは `.o2n/` ディレクトリのみ
+- frontmatter は YAML のみ受け付け、`---js` / `---json` などはそのノートだけを安全にスキップ
+- vault 内のシンボリックリンクは辿らない。`.o2n/` と `~/.o2n/` は symlink / hardlink / TOCTOU 攻撃を防ぐ形で読み書き
+- `.o2n/state.json` は vault・計画・Notion ワークスペースに署名で結合され、取り違えを検知
+- 悪意のある vault で処理をハングさせる ReDoS への対策済み
+- Notion API 以外への通信なし（テレメトリなし）。npm パッケージは Trusted Publishing（OIDC）で **provenance 付き**で公開
 
-```
-packages/
-  core/          # scanner / planner / converter / migrator / state / notion / report / credentials
-  cli/           # o2n コマンド（coreの薄いラッパー）
-  mcp-server/    # stdio MCPサーバー（coreの薄いラッパー）
-services/
-  auth-proxy/    # `o2n login`用のOAuthコード交換代理（Cloudflare Worker）
-fixtures/test-vault/  # 全構文網羅のテスト用vault
-scripts/
-  verify-release.mjs  # npm公開前の内容・チェックサム検証
-docs/
-  e2e.md         # 手動E2E手順書
-  questions.md   # 実装判断の記録
-  spec.md        # セキュリティ境界・永続化データの仕様
-```
+<details>
+<summary><b><code>o2n login</code>（OAuth 連携）の仕組みと信頼モデル</b></summary>
 
-## `o2n login`（OAuth連携）の仕組み
+- Notion の OAuth（public integration）は `client_secret` が必須なため CLI に埋め込めません。代わりに `services/auth-proxy`（Cloudflare Worker）が `client_secret` を保持し、認可コード → トークンの交換だけを代行します
+- 新方式では CLI が `127.0.0.1` の一時 HTTP リスナーを開き、Worker は交換後に短寿命の handoff code だけを loopback へ返します。CLI はセッション秘密値と handoff code を Worker へ POST し、一度だけトークンを受け取って `~/.o2n/credentials.json` に保存します
+- `client_secret` は CLI・MCP サーバー・このリポジトリのどこにも含まれません（Worker 環境変数のみ）。Worker は vault や Notion ページの内容にはアクセスしません
+- 再有効化する場合、Worker 運用者（TK-WFL または自己ホスト）を信頼する必要があります。`NOTION_TOKEN` を使う方法はこの信頼モデルに依存しません。デプロイ手順は [services/auth-proxy/README.md](services/auth-proxy/README.md)
 
-- NotionのOAuth（public integration）は`client_secret`が必須なため、CLIに埋め込むことはできない。
-  代わりに`services/auth-proxy`（Cloudflare Worker）が`client_secret`を保持し、認可コード→トークンの
-  交換だけを代行する
-- 旧poll方式は停止済み。新方式ではCLIが`127.0.0.1`の一時HTTPリスナーを開き、Workerは認可コードを
-  トークンへ交換した後、短寿命のhandoff codeだけをloopbackへ返す。CLIは手元のセッション秘密値と
-  handoff codeをWorkerへPOSTし、一度だけトークンを受け取って`~/.o2n/credentials.json`
-  （パーミッション600）に保存する
-- `client_secret`はCLI・MCPサーバー・このリポジトリのどこにも含まれない（Worker環境変数のみ）
-- Workerはトークン交換のみを行い、Vaultの内容やNotionページ内容には一切アクセスしない
+</details>
 
-デプロイ手順は[services/auth-proxy/README.md](services/auth-proxy/README.md)を参照。
+---
 
-## 開発
+## 🧑‍🔧 開発
 
 ```bash
 npm install
@@ -178,21 +226,25 @@ npm run build
 npm test
 ```
 
-実装判断の詳細・仕様書からの差分は[docs/questions.md](docs/questions.md)を参照。
+```
+packages/
+  core/          # scanner / planner / converter / migrator / state / notion / report
+  cli/           # o2n コマンド（core の薄いラッパー）
+  mcp-server/    # stdio MCP サーバー（core の薄いラッパー）
+services/
+  auth-proxy/    # `o2n login` 用の OAuth コード交換代理（Cloudflare Worker）
+fixtures/test-vault/  # 全構文網羅のテスト用 vault
+scripts/verify-release.mjs  # npm 公開前の内容・チェックサム検証
+docs/
+  e2e.md         # 手動 E2E 手順書
+  questions.md   # 実装判断と実ワークスペースでの検証記録
+  spec.md        # セキュリティ境界・永続化データの仕様
+```
 
-## セキュリティ
+不具合報告・要望は [Issues](https://github.com/TK-WFL/o2n/issues) へ。変換がうまくいかない記法があれば、その断片を添えてもらえると助かります。
 
-- Notionトークンは環境変数（`NOTION_TOKEN`）または`~/.o2n/credentials.json`（`o2n login`経由、パーミッション600）にのみ保存される
-- frontmatterはYAMLのみ対応。`---js` / `---javascript` / `---json` などの非YAML frontmatterは安全側に拒否される
-- `.o2n/state.json` はstate v2としてcanonical vault、plan hash、Notion識別子、ローカル署名で結合される
-- Vaultへの書き込みは`.o2n/`ディレクトリのみ（Vault本体は読み取り専用）
-- Vault内のシンボリックリンクは辿らない（vault外ファイルへのアクセス防止）
-- `.o2n/`配下と`~/.o2n/`配下のファイルはsymlink・hardlink・TOCTOU（検証後の差し替え）攻撃を防ぐ形で読み書きされ、`0700`/`0600`パーミッションに保たれる
-- MCPサーバーは`realpath()`済みのvaultが`O2N_ALLOWED_VAULTS`に含まれる場合のみ読み書きする
-- Notion API以外への通信は行わない（テレメトリなし）
+<div align="center">
 
-### `o2n login`（共有auth-proxy）の信頼モデル
+MIT License · [TK-WFL](https://github.com/TK-WFL)
 
-`o2n login`は既定停止中。再有効化する場合も、TK-WFLまたは自己ホストしたCloudflare Workerが
-Notionの`client_secret`を扱うため、Worker運用者を信頼する必要がある。`NOTION_TOKEN`環境変数を
-使う方法（internal integration）はこの信頼モデルに依存しない。
+</div>
