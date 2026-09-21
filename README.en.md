@@ -94,7 +94,7 @@ Exit codes: `0` = fully succeeded, `1` = some notes failed, `2` = fatal error.
 ## MCP server usage
 
 Register `@tk_wfl/o2n-mcp-server` as a stdio MCP server in Claude Desktop / Claude Code.
-Tools: `scan_vault` / `get_plan` / `update_plan` (accepts `embedMode`) / `prepare_migration` / `commit_migration` / `migration_status` / `verify_migration` / `get_report`.
+Tools: `scan_vault` / `get_plan` / `update_plan` (accepts `embedMode`) / `prepare_migration` / `commit_migration` / `resume_migration` / `cancel_migration` / `migration_status` / `verify_migration` / `get_report`. Failures and refusals are returned with `isError`.
 
 MCP access requires `O2N_ALLOWED_VAULTS=/absolute/path/to/vault` (comma-separated for multiple
 vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and

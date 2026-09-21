@@ -24,6 +24,8 @@ export interface MigratorOptions {
   dryRun: boolean;
   /** ノート単位の進捗コールバック（総ノート数ベースの進捗表示用） */
   onProgress?: (done: number, total: number, notePath: string) => void;
+  /** 中断要求（MCP の cancel_migration 等、#117）。ノート境界で確認し、以降を処理せず aborted として返す */
+  signal?: AbortSignal;
   /**
    * マルチパートアップロードのパートサイズ（既定20 MiB = Notionの単一パート上限）。
    * テストで小さなファイルでもマルチパート経路を通すために差し替え可能にしている。
@@ -50,6 +52,18 @@ function basenameNoExt(p: string): string {
 
 function folderDepth(folderPath: string): number {
   return folderPath === '' ? 0 : folderPath.split('/').length;
+}
+
+/** 利用者による中断（AbortSignal）。ブロック上限と同様に「残りを処理せず中断」として扱う */
+export class MigrationCancelledError extends Error {
+  constructor() {
+    super('利用者の要求により移行を中断しました。`o2n resume`（MCP: resume_migration）で続きから再開できます。');
+    this.name = 'MigrationCancelledError';
+  }
+}
+
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new MigrationCancelledError();
 }
 
 interface ResolverIndexes {
@@ -216,6 +230,7 @@ async function runPass1(
   let done = 0;
 
   for (const note of inventory.notes) {
+    throwIfCancelled(opts.signal);
     if (skipSet.has(note.path)) {
       await state.setNote(note.path, { status: 'skipped' });
       done += 1;
@@ -364,6 +379,7 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
   const { plan, inventory, state, api, dryRun } = opts;
 
   for (const note of inventory.notes) {
+    throwIfCancelled(opts.signal);
     const noteState = state.getNote(note.path);
     if (!noteState || noteState.status !== 'created' || !noteState.pageId) continue;
 
@@ -657,6 +673,7 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
   }
 
   for (const note of inventory.notes) {
+    throwIfCancelled(opts.signal);
     const noteState = state.getNote(note.path);
     // 'done'も対象に含めるのは、resume時に前回失敗した添付だけを再試行できるようにするため
     // （一度'done'になったノートをPass3が二度と見に行かないと、失敗した添付が永遠に直らない）
@@ -787,18 +804,23 @@ export async function runMigration(opts: MigratorOptions): Promise<ReportEntry[]
   try {
     const containers = await createFolderContainers(opts, report);
     await runPass1(opts, containers, report);
+    await runPass2(opts, report);
+    await runPass3(opts, report);
   } catch (err) {
-    if (!(err instanceof NotionBlockLimitError)) throw err;
-    // Pass2（リンク解決）は既存ページの本文更新なので続行できるが、Pass3（添付ブロック挿入）は
-    // ブロック作成のため同じ上限に当たる。中断として報告し、resume で再開できる状態で返す
+    if (!(err instanceof NotionBlockLimitError) && !(err instanceof MigrationCancelledError)) throw err;
+    // ブロック上限: Pass2（リンク解決）は続行できるが Pass3（添付ブロック挿入）は同じ上限に当たる。
+    // 利用者の中断: 即座に止める。いずれも中断として報告し、resume で再開できる状態で返す
     report.push({ category: 'aborted', path: '', message: err.message });
     await opts.state.flush();
     return report;
   }
-  await runPass2(opts, report);
-  await runPass3(opts, report);
   await opts.state.flush();
   return report;
+}
+
+/** 移行が途中で中断されたか（ブロック上限・利用者の中断） */
+export function wasAborted(entries: ReportEntry[]): boolean {
+  return entries.some((e) => e.category === 'aborted');
 }
 
 /** 移行がブロック上限で中断されたか（CLI/MCP が終了コードやメッセージを出し分けるため） */

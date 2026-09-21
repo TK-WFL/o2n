@@ -30,7 +30,7 @@ import {
   summarizeState,
 } from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
-import { getJob, setJob } from './jobs.js';
+import { cancelJob, getJob, loadJob, MAX_CONCURRENT_JOBS, registerController, releaseController, runningJobCount, setJob } from './jobs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(await fs.readFile(path.join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string };
@@ -38,6 +38,11 @@ const server = new McpServer({ name: 'o2n-mcp-server', version: pkg.version });
 
 function text(content: string) {
   return { content: [{ type: 'text' as const, text: content }] };
+}
+
+/** 失敗・拒否の応答。isError を付けてエージェントが成功と区別できるようにする（#117） */
+function errorText(content: string) {
+  return { content: [{ type: 'text' as const, text: content }], isError: true as const };
 }
 
 interface PreparedMigration {
@@ -71,17 +76,17 @@ function writeTokenMatches(token: string): boolean {
 }
 
 /** vaultPathが実際にObsidian vaultらしいディレクトリでなければエラーを返す（任意パスアクセス対策） */
-async function guardVaultPath(vaultPath: string): Promise<{ error: ReturnType<typeof text> } | { error: null; vaultPath: string }> {
+async function guardVaultPath(vaultPath: string): Promise<{ error: ReturnType<typeof errorText> } | { error: null; vaultPath: string }> {
   try {
     const roots = allowedVaultRoots();
     if (!roots) {
-      return { error: text('O2N_ALLOWED_VAULTS が未設定のため、MCPからのvaultアクセスを拒否しました。許可するvaultの実パスをカンマ区切りで設定してください。') };
+      return { error: errorText('O2N_ALLOWED_VAULTS が未設定のため、MCPからのvaultアクセスを拒否しました。許可するvaultの実パスをカンマ区切りで設定してください。') };
     }
     const resolved = await assertObsidianVault(vaultPath, { allowedVaultRoots: roots });
     return { error: null, vaultPath: resolved };
   } catch (err) {
     if (err instanceof NotAnObsidianVaultError || err instanceof VaultNotAllowedError) {
-      return { error: text(err.message) };
+      return { error: errorText(err.message) };
     }
     throw err;
   }
@@ -150,8 +155,8 @@ server.tool(
   async ({ vaultPath, patch }) => {
     const guard = await guardVaultPath(vaultPath);
     if (guard.error) return guard.error;
-    if (!mcpWriteEnabled()) return text('MCPからの計画更新は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください。');
-    if (!patch.confirmationToken || !writeTokenMatches(patch.confirmationToken)) return text('confirmationToken が一致しないため、計画更新を拒否しました。');
+    if (!mcpWriteEnabled()) return errorText('MCPからの計画更新は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください。');
+    if (!patch.confirmationToken || !writeTokenMatches(patch.confirmationToken)) return errorText('confirmationToken が一致しないため、計画更新を拒否しました。');
     const plan = await loadOrCreatePlan(guard.vaultPath);
     if (patch.parentPageId) plan.parentPageId = patch.parentPageId;
     if (patch.folders) plan.folders = patch.folders;
@@ -175,7 +180,7 @@ server.tool(
     if (guard.error) return guard.error;
     const resolved = guard.vaultPath;
     if (!dryRun && !mcpWriteEnabled()) {
-      return text('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 と O2N_MCP_WRITE_TOKEN を設定し、commit_migrationで確認トークンを渡してください。');
+      return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 と O2N_MCP_WRITE_TOKEN を設定し、commit_migrationで確認トークンを渡してください。');
     }
 
     const inventory = await scanVault(resolved);
@@ -220,6 +225,10 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
   if (existing?.status === 'running') {
     return `既に移行が実行中です（進捗 ${existing.done}/${existing.total}）。migration_status で確認してください。`;
   }
+  if (runningJobCount() >= MAX_CONCURRENT_JOBS) {
+    return `同時に実行できる移行は ${MAX_CONCURRENT_JOBS} 件までです。他の vault の移行が終わるまで待ってください。`;
+  }
+  const controller = registerController(resolved);
 
     const inventory = await scanVault(resolved);
     const plan = await loadOrCreatePlan(resolved, parentPageId);
@@ -253,12 +262,13 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
           onProgress: (done, total, currentPath) => {
             setJob(resolved, { status: 'running', done, total, currentPath, startedAt: getJob(resolved)?.startedAt ?? Date.now() });
           },
+          signal: controller.signal,
         });
         const report = buildReport(state.snapshot, entries, { startedAt, finishedAt: Date.now(), apiCalls: api.callCount, dryRun, before });
         await writeReport(resolved, report, state.snapshot);
         if (wasAbortedByBlockLimit(entries)) {
           setJob(resolved, {
-            status: 'error',
+            status: controller.signal.aborted ? 'cancelled' : 'error',
             done: getJob(resolved)?.done ?? 0,
             total: inventory.notes.length,
             currentPath: '',
@@ -286,6 +296,8 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
           startedAt: getJob(resolved)?.startedAt ?? Date.now(),
           finishedAt: Date.now(),
         });
+      } finally {
+        releaseController(resolved);
       }
     })();
 
@@ -304,20 +316,20 @@ server.tool(
   },
   async ({ requestId, confirmationToken }) => {
     const prepared = preparedMigrations.get(requestId);
-    if (!prepared) return text('requestId が見つかりません。prepare_migration をやり直してください。');
+    if (!prepared) return errorText('requestId が見つかりません。prepare_migration をやり直してください。');
     if (Date.now() - prepared.createdAt > PREPARE_TTL_MS) {
       preparedMigrations.delete(requestId);
-      return text('requestId の有効期限が切れました。prepare_migration をやり直してください。');
+      return errorText('requestId の有効期限が切れました。prepare_migration をやり直してください。');
     }
     if (!prepared.dryRun) {
-      if (!mcpWriteEnabled()) return text('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください。');
-      if (!confirmationToken || !writeTokenMatches(confirmationToken)) return text('confirmationToken が一致しないため、本実行を拒否しました。');
+      if (!mcpWriteEnabled()) return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください。');
+      if (!confirmationToken || !writeTokenMatches(confirmationToken)) return errorText('confirmationToken が一致しないため、本実行を拒否しました。');
     }
     const inventory = await scanVault(prepared.vaultPath);
     const plan = await loadOrCreatePlan(prepared.vaultPath, prepared.parentPageId);
     if (planHash(plan) !== prepared.planHash || inventory.notes.length !== prepared.noteCount || inventory.attachments.length !== prepared.attachmentCount) {
       preparedMigrations.delete(requestId);
-      return text('prepare_migration後に計画またはvault内容が変わったため、実行を拒否しました。prepare_migrationをやり直してください。');
+      return errorText('prepare_migration後に計画またはvault内容が変わったため、実行を拒否しました。prepare_migrationをやり直してください。');
     }
     preparedMigrations.delete(requestId);
     return text(await startMigrationJob(prepared.vaultPath, prepared.parentPageId, prepared.dryRun));
@@ -333,7 +345,44 @@ server.tool(
     dryRun: z.boolean().default(true).describe('互換性のための引数。実行はされません。'),
   },
   async () => {
-    return text('start_migration は安全上の理由で無効化されました。prepare_migration で内容を固定し、commit_migration で実行してください。');
+    return errorText('start_migration は安全上の理由で無効化されました。prepare_migration で内容を固定し、commit_migration で実行してください。');
+  },
+);
+
+server.tool(
+  'resume_migration',
+  '中断・失敗した移行を、vault 内の既存の計画（.o2n/plan.json）と state から続きから再開する。dry-run 以外は commit_migration と同じく O2N_ENABLE_MCP_WRITE=1 と confirmationToken が必須。',
+  {
+    vaultPath: z.string().describe('Obsidian vaultの絶対パス'),
+    dryRun: z.boolean().default(false).describe('trueの場合、書き込みAPIを呼ばずシミュレーションのみ行う'),
+    confirmationToken: z.string().optional().describe('本実行時にO2N_MCP_WRITE_TOKENと一致している必要がある確認トークン'),
+  },
+  async ({ vaultPath, dryRun, confirmationToken }) => {
+    const guard = await guardVaultPath(vaultPath);
+    if (guard.error) return guard.error;
+    if (!dryRun) {
+      if (!mcpWriteEnabled()) return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください。');
+      if (!confirmationToken || !writeTokenMatches(confirmationToken)) return errorText('confirmationToken が一致しないため、再開を拒否しました。');
+    }
+    let plan;
+    try {
+      plan = await loadOrCreatePlan(guard.vaultPath);
+    } catch (err) {
+      return errorText(`計画（.o2n/plan.json）が読めません。先に get_plan / prepare_migration を実行してください: ${String(err)}`);
+    }
+    return text(await startMigrationJob(guard.vaultPath, plan.parentPageId, dryRun));
+  },
+);
+
+server.tool(
+  'cancel_migration',
+  '実行中の移行をノート境界で中断する。処理済みのページはそのまま残り、resume_migration で続きから再開できる。',
+  { vaultPath: z.string().describe('Obsidian vaultの絶対パス') },
+  async ({ vaultPath }) => {
+    const guard = await guardVaultPath(vaultPath);
+    if (guard.error) return guard.error;
+    if (!cancelJob(guard.vaultPath)) return errorText('実行中の移行がありません。');
+    return text('中断を要求しました。現在のノートの処理が終わり次第止まります。migration_status で確認してください。');
   },
 );
 
@@ -345,7 +394,7 @@ server.tool(
     const guard = await guardVaultPath(vaultPath);
     if (guard.error) return guard.error;
     const resolved = guard.vaultPath;
-    const job = getJob(resolved);
+    const job = await loadJob(resolved);
     let stateSummary: Record<string, number> = {};
     try {
       const raw = await readVaultStateFile(resolved, 'state.json');
@@ -376,14 +425,14 @@ server.tool(
       state = JSON.parse(await readVaultStateFile(guard.vaultPath, 'state.json')) as StateFile;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      return text('state.json がありません。先に移行を実行してください。');
+      return errorText('state.json がありません。先に移行を実行してください。');
     }
     const inventory = await scanVault(guard.vaultPath);
     const summary = summarizeState(state, inventory);
     if (!deep) return text(JSON.stringify(summary, null, 2));
 
     const token = process.env.NOTION_TOKEN ?? (await loadCredentials())?.token ?? '';
-    if (!token) return text('Notionと連携されていません。NOTION_TOKEN を設定してください。');
+    if (!token) return errorText('Notionと連携されていません。NOTION_TOKEN を設定してください。');
     const api = new NotionApi(new NotionClient({ token, dryRun: false, rateLimit: rateLimitFromEnv() }));
     const result = await deepVerifyNotes(api, state, { orphaned: summary.orphaned });
     return text(JSON.stringify({ ...summary, deep: result }, null, 2));
@@ -402,7 +451,7 @@ server.tool(
       return text(content);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      return text('レポートがまだ生成されていません。commit_migration の完了後（migration_status が done）に再度お試しください。');
+      return errorText('レポートがまだ生成されていません。commit_migration の完了後（migration_status が done）に再度お試しください。');
     }
   },
 );
