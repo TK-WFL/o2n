@@ -75,9 +75,9 @@ npx @tk_wfl/o2n-cli scan <vaultPath>
 npx @tk_wfl/o2n-cli plan <vaultPath> --parent <NotionページID>
 #   --embed-mode inline を付けると ![[ノート]] の埋め込みを本文にインライン展開する（既定はリンクに降格）
 
-# 3. 移行実行（--dry-run でシミュレーションのみ、書き込みAPIを呼ばない）
-npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json --dry-run   # 結果は .o2n/report.dry-run.md（本番の report.md は上書きしない）
-npx @tk_wfl/o2n-cli migrate <vaultPath> --plan <vaultPath>/.o2n/plan.json
+# 3. 移行実行（--dry-run でシミュレーションのみ、書き込みAPIを呼ばない。--plan 省略時は <vaultPath>/.o2n/plan.json）
+npx @tk_wfl/o2n-cli migrate <vaultPath> --dry-run   # 結果は .o2n/report.dry-run.md（本番の report.md は上書きしない）
+npx @tk_wfl/o2n-cli migrate <vaultPath>        # --quiet で進捗表示を抑制
 
 # 4. 中断からの再開（同じコマンドで冪等に完了まで進む）
 npx @tk_wfl/o2n-cli resume <vaultPath>
@@ -85,7 +85,7 @@ npx @tk_wfl/o2n-cli resume <vaultPath>
 # 5. 検証・レポート確認
 npx @tk_wfl/o2n-cli verify <vaultPath>
 # --deep を付けると Notion の実ページも取得し、ページの存在・ゴミ箱・未解決プレースホルダー・添付数を照合する（読み取りのみ）
-npx @tk_wfl/o2n-cli verify <vaultPath> --deep
+npx @tk_wfl/o2n-cli verify <vaultPath> --deep   # --json で機械可読出力（scan も同様）
 npx @tk_wfl/o2n-cli report <vaultPath>
 ```
 

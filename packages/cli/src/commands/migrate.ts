@@ -21,24 +21,47 @@ import {
 import { getToken } from '../token.js';
 
 export interface MigrateCommandOptions {
-  plan: string;
+  /** 省略時は <vaultPath>/.o2n/plan.json */
+  plan?: string;
+  quiet?: boolean;
   parent?: string;
   dryRun?: boolean;
   verbose?: boolean;
 }
 
+/**
+ * 進捗表示（#116）: TTY なら同じ行を \\r で上書き、パイプ/ログなら 10% ごとに1行出す。
+ * --quiet では何も出さない
+ */
+export function progressPrinter(quiet: boolean): (done: number, total: number, notePath: string) => void {
+  if (quiet) return () => undefined;
+  if (process.stdout.isTTY) {
+    return (done, total, notePath) => process.stdout.write(`\r進捗: ${done}/${total} (${notePath})${' '.repeat(20)}`);
+  }
+  let lastBucket = -1;
+  return (done, total) => {
+    const bucket = total === 0 ? 10 : Math.floor((done * 10) / total);
+    if (bucket !== lastBucket || done === total) {
+      lastBucket = bucket;
+      console.log(`進捗: ${done}/${total}`);
+    }
+  };
+}
+
 /** exit code: 0=全件成功, 1=一部failed, 2=致命的エラー */
 export async function migrateCommand(vaultPath: string, opts: MigrateCommandOptions): Promise<number> {
   const dryRun = opts.dryRun ?? false;
+  const planOption = opts.plan ?? path.join(vaultPath, '.o2n', 'plan.json');
   let plan: MigrationPlan;
   try {
     const vaultPlanPath = path.resolve(vaultPath, '.o2n', 'plan.json');
-    const raw = path.resolve(opts.plan) === vaultPlanPath
+    const raw = path.resolve(planOption) === vaultPlanPath
       ? await readVaultStateFile(vaultPath, 'plan.json')
-      : await readRegularFileNoFollow(opts.plan);
+      : await readRegularFileNoFollow(planOption);
     plan = parseMigrationPlan(JSON.parse(raw));
   } catch (err) {
-    console.error(`計画ファイルの読み込みに失敗しました: ${opts.plan}\n${String(err)}`);
+    const hint = opts.plan ? '' : '\n先に `o2n plan <vaultPath> --parent <NotionページID>` で計画を作成してください。';
+    console.error(`計画ファイルの読み込みに失敗しました: ${planOption}\n${String(err)}${hint}`);
     return 2;
   }
   if (opts.parent) plan.parentPageId = opts.parent;
@@ -73,12 +96,10 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
     api,
     state,
     dryRun,
-    onProgress: (done, t, notePath) => {
-      process.stdout.write(`\r進捗: ${done}/${t} (${notePath})${' '.repeat(20)}`);
-      void total;
-    },
+    onProgress: progressPrinter(opts.quiet ?? false),
   });
-  process.stdout.write('\n');
+  if (!opts.quiet && process.stdout.isTTY) process.stdout.write('\n');
+  void total;
 
   const report = buildReport(state.snapshot, entries, { startedAt, finishedAt: Date.now(), apiCalls: api.callCount, dryRun, before });
   await writeReport(vaultPath, report, state.snapshot, dryRun);
