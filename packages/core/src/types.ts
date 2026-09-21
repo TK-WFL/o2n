@@ -186,8 +186,8 @@ export interface MigrationRunMeta {
   /** Notion API 呼び出し回数（dry-run は呼ばずに数えた回数） */
   apiCalls: number;
   dryRun: boolean;
-  /** 実行前のノート状態（差分表示用） */
-  before: Record<string, NoteStatus>;
+  /** 実行前のノート状態（差分表示用）。contentHash があれば「同じページを更新した」も検出できる */
+  before: Record<string, NoteStatus | { status: NoteStatus; contentHash?: string }>;
 }
 
 export interface MigrationReport {
