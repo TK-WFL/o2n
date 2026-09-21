@@ -10,7 +10,9 @@ import type {
   WikiLink,
 } from './types.js';
 
-const EXCLUDED_DIRS = new Set(['.obsidian', '.trash', '.o2n']);
+const EXCLUDED_DIRS = new Set(['.obsidian', '.trash', '.o2n', 'node_modules']);
+/** `.` で始まるディレクトリ（.git 等）は Obsidian も表示しないため走査しない（#108） */
+const isHiddenDir = (name: string): boolean => name.startsWith('.');
 
 const ATTACHMENT_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp',
@@ -70,7 +72,7 @@ async function walk(dir: string, root: string, out: string[]): Promise<void> {
     // symlinkに対して通常falseを返すが、意図を明確にするため明示的に判定する。
     if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
-      if (EXCLUDED_DIRS.has(entry.name)) continue;
+      if (EXCLUDED_DIRS.has(entry.name) || isHiddenDir(entry.name)) continue;
       await walk(path.join(dir, entry.name), root, out);
     } else if (entry.isFile()) {
       out.push(toPosix(path.relative(root, path.join(dir, entry.name))));
@@ -145,13 +147,32 @@ export function buildNameIndex(paths: string[]): Map<string, string[]> {
   for (const p of paths) {
     const base = path.posix.basename(p);
     const baseNoExt = base.replace(/\.[^.]+$/, '');
-    for (const key of [base, baseNoExt]) {
-      const list = index.get(key) ?? [];
-      list.push(p);
-      index.set(key, list);
-    }
+    addIndexKeys(index, [base, baseNoExt], p);
   }
   return index;
+}
+
+/** 大文字小文字を区別しないフォールバック用のキー接頭辞（実キーと衝突しない文字を使う） */
+const CI_KEY_PREFIX = '\u0000ci:';
+
+/**
+ * 索引に実キーと、大文字小文字を畳み込んだキーの両方で登録する。解決時は実キーの完全一致を
+ * 優先し、無ければ畳み込みキーで探す（macOS/Windows の Obsidian は `[[note]]` を `Note.md` に
+ * 解決するため、#107）。
+ */
+function addIndexKeys(index: Map<string, string[]>, keys: string[], p: string): void {
+  for (const key of keys) {
+    for (const k of [key, CI_KEY_PREFIX + key.toLowerCase()]) {
+      const list = index.get(k) ?? [];
+      if (!list.includes(p)) list.push(p);
+      index.set(k, list);
+    }
+  }
+}
+
+/** 完全一致 → 大文字小文字非依存 の順で候補を引く */
+function lookupIndex(index: Map<string, string[]>, key: string): string[] {
+  return index.get(key) ?? index.get(CI_KEY_PREFIX + key.toLowerCase()) ?? [];
 }
 
 /**
@@ -167,9 +188,7 @@ export function buildAliasIndex(notes: Array<Pick<NoteRecord, 'path' | 'frontmat
       if (typeof v !== 'string' && typeof v !== 'number') continue;
       const key = String(v).trim();
       if (!key) continue;
-      const list = index.get(key) ?? [];
-      if (!list.includes(note.path)) list.push(note.path);
-      index.set(key, list);
+      addIndexKeys(index, [key], note.path);
     }
   }
   return index;
@@ -187,7 +206,7 @@ export function resolveNoteLink(
 ): { resolved: string | null; warning?: NoteResolutionWarning } {
   const byName = resolveByFilename(target, sourcePath, nameIndex);
   if (byName.resolved !== null) return byName;
-  if (!aliasIndex.has(target.trim())) return byName;
+  if (lookupIndex(aliasIndex, target.trim()).length === 0) return byName;
   return resolveByFilename(target.trim(), sourcePath, aliasIndex);
 }
 
@@ -200,7 +219,7 @@ export function resolveByFilename(
   nameIndex: Map<string, string[]>,
 ): { resolved: string | null; warning?: NoteResolutionWarning } {
   const key = path.posix.basename(target);
-  const candidates = [...new Set(nameIndex.get(key) ?? [])];
+  const candidates = [...new Set(lookupIndex(nameIndex, key))];
   if (candidates.length === 0) {
     return {
       resolved: null,
@@ -262,9 +281,23 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
 
   for (const relPath of mdPaths) {
     const absPath = path.join(vaultPath, relPath);
-    const raw = await fs.readFile(absPath, 'utf-8');
-    const stat = await fs.stat(absPath);
-    const parsed = parseNoteMatter(raw, relPath);
+    // 1ノートの読み取り失敗や非YAML frontmatter で vault 全体のスキャンを止めない（#108）。
+    // 非YAML frontmatter は安全のため解析せず、そのノートだけを skipped にする
+    let raw: string;
+    let stat: { size: number };
+    let parsed: ReturnType<typeof parseNoteMatter>;
+    try {
+      raw = await fs.readFile(absPath, 'utf-8');
+      stat = await fs.stat(absPath);
+      parsed = parseNoteMatter(raw, relPath);
+    } catch (err) {
+      const reason =
+        err instanceof UnsupportedFrontmatterLanguageError
+          ? 'frontmatter が YAML 以外の形式（js/json/toml 等）のため安全上スキップしました。YAML に直すと移行できます'
+          : `読み取りに失敗したためスキップしました: ${err instanceof Error ? err.message : String(err)}`;
+      skipped.push({ path: relPath, reason });
+      continue;
+    }
     const frontmatter = parsed.data ?? {};
 
     let content = parsed.content;
@@ -331,6 +364,19 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
         raw: link.raw,
       });
     }
+  }
+
+  // ノートリンクの曖昧さ（同名ノートが同じ距離に複数）はここで一度だけ報告する。
+  // 以前は migrator 側の解決で警告を捨てていたため、黙って先頭候補に繋がっていた（#107）
+  const aliasIndex = buildAliasIndex(notes);
+  const seen = new Set<string>();
+  for (const link of wikiLinks) {
+    const { warning } = resolveNoteLink(link.target, link.sourcePath, nameIndex, aliasIndex);
+    if (!warning || warning.reason !== 'ambiguous') continue;
+    const key = `${link.sourcePath}\u0000${link.target}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    warnings.push(warning);
   }
 
   return {
