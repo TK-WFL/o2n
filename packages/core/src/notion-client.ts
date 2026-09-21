@@ -271,6 +271,11 @@ export class NotionApi {
     return this.client.request({ method: 'POST', path: '/pages', body: params });
   }
 
+  /** ページのプロパティ（タイトル・DB行の値）を更新する。本文は updatePageMarkdown を使う */
+  async updatePageProperties(pageId: string, properties: Record<string, unknown>): Promise<{ id: string; url: string }> {
+    return this.client.request({ method: 'PATCH', path: `/pages/${pageId}`, body: { properties } });
+  }
+
   async getPage(pageId: string): Promise<{ id: string; in_trash?: boolean; url?: string }> {
     return this.client.request({ method: 'GET', path: `/pages/${pageId}` });
   }
