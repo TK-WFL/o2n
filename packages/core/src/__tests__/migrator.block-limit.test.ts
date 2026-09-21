@@ -76,3 +76,20 @@ describe('Free プランのブロック上限で中断・再開（#70）', () =>
     expect(mock.calls.filter((c) => c.method === 'POST' && c.path === '/pages')).toHaveLength(1);
   });
 });
+
+describe('AbortSignal による中断（#117）', () => {
+  it('signal が abort されるとノート境界で止まり、aborted として報告され、処理済みは残る', async () => {
+    const mock = createMockServer();
+    const { inventory, plan, api, state } = await setupMigration(tmpDir, mock.fetchImpl);
+    const controller = new AbortController();
+    let seen = 0;
+    const report = await runMigration({
+      vaultPath: tmpDir, plan, inventory, api, state, dryRun: false, signal: controller.signal,
+      onProgress: () => { seen += 1; if (seen === 2) controller.abort(); },
+    });
+    expect(report.some((e) => e.category === 'aborted' && e.message.includes('中断'))).toBe(true);
+    const created = Object.values(state.snapshot.notes).filter((n) => n.status === 'created').length;
+    expect(created).toBe(2);
+    expect(mock.calls.filter((c) => c.method === 'POST' && c.path === '/pages')).toHaveLength(2);
+  });
+});

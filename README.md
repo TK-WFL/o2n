@@ -94,7 +94,7 @@ npx @tk_wfl/o2n-cli report <vaultPath>
 ## 使い方（MCPサーバー）
 
 Claude Desktop / Claude Code から `@tk_wfl/o2n-mcp-server` を stdio MCP サーバーとして登録する。
-ツール: `scan_vault` / `get_plan` / `update_plan`（`embedMode` も指定可）/ `prepare_migration` / `commit_migration` / `migration_status` / `verify_migration` / `get_report`。
+ツール: `scan_vault` / `get_plan` / `update_plan`（`embedMode` も指定可）/ `prepare_migration` / `commit_migration` / `resume_migration` / `cancel_migration` / `migration_status` / `verify_migration` / `get_report`。失敗・拒否の応答は `isError` 付き。
 
 MCPからvaultへアクセスするには、`O2N_ALLOWED_VAULTS=/absolute/path/to/vault` のように許可vaultを
 カンマ区切りで明示する。Notionへの本実行は既定で無効で、`O2N_ENABLE_MCP_WRITE=1` と

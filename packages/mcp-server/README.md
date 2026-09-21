@@ -27,7 +27,7 @@ vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
 ## Tools
 
 `scan_vault` / `get_plan` / `update_plan` / `prepare_migration` / `commit_migration` /
-`migration_status` / `verify_migration` (pass `deep: true` to compare against the real Notion pages) / `get_report`
+`resume_migration` / `cancel_migration` / `migration_status` / `verify_migration` (pass `deep: true` to compare against the real Notion pages) / `get_report`
 
 See the [main README](https://github.com/TK-WFL/o2n#readme) for the full setup guide and
 security model.
