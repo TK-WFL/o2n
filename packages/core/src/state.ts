@@ -203,7 +203,7 @@ function validateStateBinding(
   },
 ): void {
   if (data.parentPageId !== opts.parentPageId) {
-    throw new StateIntegrityError('state.json の parentPageId が現在の計画と一致しません。--reset-state などで明示的に作り直してください。');
+    throw new StateIntegrityError('state.json の parentPageId が現在の計画と一致しません。別の移行先へやり直す場合は vault 内の .o2n/state.json を削除してから migrate を実行してください（Notion 上の既存ページは削除されません）。');
   }
 
   if (data.version !== 2) {

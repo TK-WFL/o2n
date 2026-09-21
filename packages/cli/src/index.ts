@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { scanCommand } from './commands/scan.js';
-import { planCommand } from './commands/plan.js';
+import { planCommand, PlanInputRequiredError } from './commands/plan.js';
 import { migrateCommand } from './commands/migrate.js';
 import { resumeCommand } from './commands/resume.js';
 import { verifyCommand } from './commands/verify.js';
@@ -61,7 +61,16 @@ program
       process.exitCode = 2;
       return;
     }
-    await planCommand(vaultPath, { ...opts, embedMode: opts.embedMode as 'link' | 'inline' | undefined });
+    try {
+      await planCommand(vaultPath, { ...opts, embedMode: opts.embedMode as 'link' | 'inline' | undefined });
+    } catch (err) {
+      if (err instanceof PlanInputRequiredError) {
+        console.error(err.message);
+        process.exitCode = 2;
+        return;
+      }
+      throw err;
+    }
   });
 
 program

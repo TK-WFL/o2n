@@ -36,3 +36,21 @@ describe('planCommand custom output', () => {
     expect(plan.parentPageId).toBe('parent-page');
   });
 });
+
+describe('planCommand 非対話環境（#110）', () => {
+  it('stdin/stdout が TTY でなく --parent も無い場合は PlanInputRequiredError', async () => {
+    const { PlanInputRequiredError } = await import('./plan.js');
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    await expect(planCommand(vaultPath, {})).rejects.toBeInstanceOf(PlanInputRequiredError);
+  });
+
+  it('非対話環境でも --parent があれば plan を書き、DB 提案は --yes 無しでは page_tree のまま', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    await fs.mkdir(path.join(vaultPath, 'DB'));
+    for (const n of ['a', 'b', 'c']) await fs.writeFile(path.join(vaultPath, 'DB', `${n}.md`), '---\nx: 1\ny: 2\nz: 3\n---\n');
+    const out = path.join(testRoot, 'p.json');
+    await planCommand(vaultPath, { parent: 'root', out });
+    const plan = JSON.parse(await fs.readFile(out, 'utf-8')) as { folders: Array<{ folderPath: string; mode: string }> };
+    expect(plan.folders.find((f) => f.folderPath === 'DB')?.mode).toBe('page_tree');
+  });
+});

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { promises as fs } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -30,7 +32,9 @@ import {
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
 import { getJob, setJob } from './jobs.js';
 
-const server = new McpServer({ name: 'o2n-mcp-server', version: '0.1.0' });
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(await fs.readFile(path.join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string };
+const server = new McpServer({ name: 'o2n-mcp-server', version: pkg.version });
 
 function text(content: string) {
   return { content: [{ type: 'text' as const, text: content }] };
@@ -396,7 +400,7 @@ server.tool(
       return text(content);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      return text('レポートがまだ生成されていません。start_migration の完了後に再度お試しください。');
+      return text('レポートがまだ生成されていません。commit_migration の完了後（migration_status が done）に再度お試しください。');
     }
   },
 );

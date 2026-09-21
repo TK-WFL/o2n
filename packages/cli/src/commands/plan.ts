@@ -11,6 +11,13 @@ import {
   type FolderPlan,
 } from '@tk_wfl/o2n-core';
 
+export class PlanInputRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PlanInputRequiredError';
+  }
+}
+
 export interface PlanCommandOptions {
   out?: string;
   parent?: string;
@@ -27,6 +34,11 @@ export async function planCommand(vaultPath: string, opts: PlanCommandOptions): 
   const limitWarning = blockLimitWarning(estimatedBlocks);
   if (limitWarning) console.log(`\n⚠ ${limitWarning}\n`);
 
+  // 非対話環境（CI・パイプ）では対話プロンプトを出せないので、必要な入力が無ければ明確に失敗させる（#110）
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  if (!interactive && !opts.parent) {
+    throw new PlanInputRequiredError('非対話環境では --parent <NotionページID> が必須です。');
+  }
   const parentPageId =
     opts.parent ?? (await input({ message: '移行先のNotion親ページIDを入力してください:' }));
 
@@ -36,7 +48,9 @@ export async function planCommand(vaultPath: string, opts: PlanCommandOptions): 
   for (const folder of suggested) {
     if (folder.mode === 'database') {
       console.log(`\nフォルダ "${folder.folderPath}" はDB化を提案されています: ${folder.suggestionReason}`);
-      const accept = opts.yes ? true : await confirm({ message: 'databaseモードで移行しますか？', default: true });
+      // 非対話環境で --yes が無い場合は提案を受け入れず page_tree のまま（確認なしに DB 化しない）
+      const accept = opts.yes ? true : interactive ? await confirm({ message: 'databaseモードで移行しますか？', default: true }) : false;
+      if (!opts.yes && !interactive) console.log('  非対話環境のため page_tree のままにします（--yes で自動承認）');
       finalFolders.push({ ...folder, mode: accept ? 'database' : 'page_tree' });
     } else {
       finalFolders.push(folder);
