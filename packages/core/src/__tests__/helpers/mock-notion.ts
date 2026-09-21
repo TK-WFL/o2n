@@ -127,6 +127,15 @@ export function createMockServer() {
       return jsonResponse({ results: [{ id: 'appended-block' }] });
     }
 
+    if (method === 'PATCH' && /^\/blocks\/[^/]+$/.test(p)) {
+      const blockId = p.split('/')[2] ?? '';
+      for (const blocks of pageBlocks.values()) {
+        const b = blocks.find((x) => x.id === blockId);
+        if (b) Object.assign(b, body as Record<string, unknown>);
+      }
+      return jsonResponse({ id: blockId });
+    }
+
     if (method === 'DELETE' && /\/blocks\//.test(p)) {
       const blockId = p.split('/')[2] ?? '';
       for (const blocks of pageBlocks.values()) {
@@ -204,7 +213,8 @@ export function extractFileBlocks(markdown: string, pageId: string) {
       blocks.push({
         id: `${pageId}-block-${n}`,
         type,
-        [type]: { rich_text: [{ text: { content: m[0] } }] },
+        // 実機同様、プレースホルダーと同じ行の文章もブロック本文に含める
+        [type]: { rich_text: [{ text: { content: line.replace(/^\s*-\s/, '').trim() } }] },
       });
       n += 1;
     }

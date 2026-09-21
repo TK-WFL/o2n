@@ -472,6 +472,32 @@ interface PlaceholderLocation {
   blockId: string;
   /** プレースホルダーブロックの直接の親（ページ本体ならページID）。after_block で挿入する際の親に使う */
   parentId: string;
+  /** プレースホルダーを含むブロック本体（type とその rich_text）。他のテキストと同居しているか判定するため保持 */
+  block: NotionBlock;
+}
+
+interface RichTextRun {
+  type?: string;
+  text?: { content: string; link?: unknown };
+  plain_text?: string;
+  [k: string]: unknown;
+}
+
+/**
+ * プレースホルダーが「そのブロックの唯一の内容」でない（文中に `[資料](a.pdf)` のように他の文字と
+ * 同居している）場合、ブロックごと削除すると周囲の文章が消える。その場合はプレースホルダー文字列だけを
+ * 取り除いた rich_text を返す。唯一の内容なら null（＝ブロックを削除してよい）。
+ */
+function richTextWithoutPlaceholder(block: NotionBlock, placeholder: string): RichTextRun[] | null {
+  const payload = block[block.type] as { rich_text?: RichTextRun[] } | undefined;
+  const runs = payload?.rich_text;
+  if (!Array.isArray(runs)) return null;
+  const plain = runs.map((r) => r.text?.content ?? r.plain_text ?? '').join('');
+  if (plain.trim() === placeholder) return null;
+  const cleaned = runs
+    .map((r) => (r.text ? { ...r, text: { ...r.text, content: r.text.content.split(placeholder).join('') } } : r))
+    .filter((r) => !r.text || r.text.content.length > 0);
+  return cleaned;
 }
 
 /**
@@ -502,7 +528,7 @@ async function findPlaceholderBlocks(
       const json = JSON.stringify(block);
       for (const ph of remaining) {
         if (json.includes(ph)) {
-          found.set(ph, { blockId: block.id, parentId: blockId });
+          found.set(ph, { blockId: block.id, parentId: blockId, block });
           remaining.delete(ph);
         }
       }
@@ -626,7 +652,15 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
         }
         const ext = file.targetPath.split('.').pop() ?? '';
         await api.appendBlockChildren(location.parentId, [buildAttachmentBlock(fileUploadId!, ext)], location.blockId);
-        await api.deleteBlock(location.blockId);
+        const remaining = richTextWithoutPlaceholder(location.block, file.placeholder);
+        if (remaining === null) {
+          await api.deleteBlock(location.blockId);
+        } else {
+          // 文中の添付リンク: 周囲の文章を残してプレースホルダーだけ消す（#109 で発覚、v0.3.1）
+          await api.updateBlock(location.blockId, { [location.block.type]: { rich_text: remaining } });
+          // 同じブロックに別のプレースホルダーが残っている場合に備え、保持している本文も更新する
+          (location.block[location.block.type] as { rich_text?: RichTextRun[] }).rich_text = remaining;
+        }
         await state.setFile(file.targetPath, { status: 'attached', fileUploadId });
         attachedPlaceholders.add(file.placeholder);
         await state.setNote(note.path, { ...state.getNote(note.path)!, attachedPlaceholders: [...attachedPlaceholders] });
