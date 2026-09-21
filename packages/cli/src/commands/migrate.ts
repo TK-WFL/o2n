@@ -88,7 +88,7 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
   const total = inventory.notes.length;
 
   const startedAt = Date.now();
-  const before = Object.fromEntries(Object.entries(state.snapshot.notes).map(([p, n]) => [p, n.status]));
+  const before = Object.fromEntries(Object.entries(state.snapshot.notes).map(([p, n]) => [p, { status: n.status, contentHash: n.contentHash }]));
   const entries: ReportEntry[] = await runMigration({
     vaultPath,
     plan,

@@ -251,7 +251,7 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
           allowUnsignedState: false,
         });
         const startedAt = Date.now();
-        const before = Object.fromEntries(Object.entries(state.snapshot.notes).map(([p, n]) => [p, n.status]));
+        const before = Object.fromEntries(Object.entries(state.snapshot.notes).map(([p, n]) => [p, { status: n.status, contentHash: n.contentHash }]));
         const entries = await runMigration({
           vaultPath: resolved,
           plan,

@@ -27,17 +27,18 @@ export function buildReport(state: StateFile, entries: ReportEntry[], run?: Migr
 }
 
 /** 実行前後の state から「今回の実行で何が起きたか」を数える（#118） */
-export function diffRun(before: Record<string, NoteStatus>, state: StateFile): { created: string[]; updated: string[]; unchanged: string[]; failed: string[] } {
+export function diffRun(before: MigrationRunMeta['before'], state: StateFile): { created: string[]; updated: string[]; unchanged: string[]; failed: string[] } {
   const created: string[] = [];
   const updated: string[] = [];
   const unchanged: string[] = [];
   const failed: string[] = [];
   for (const [p, n] of Object.entries(state.notes)) {
-    const prev = before[p];
+    const raw = before[p];
+    const prev = raw === undefined ? undefined : typeof raw === 'string' ? { status: raw as NoteStatus } : raw;
     if (n.status === 'failed') failed.push(p);
     else if (n.status === 'skipped') continue;
     else if (prev === undefined) created.push(p);
-    else if (prev === 'done' && n.status === 'done') unchanged.push(p);
+    else if (prev.status === 'done' && n.status === 'done' && (prev.contentHash === undefined || prev.contentHash === n.contentHash)) unchanged.push(p);
     else updated.push(p);
   }
   return { created, updated, unchanged, failed };

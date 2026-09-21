@@ -18,6 +18,10 @@ describe('report（#118）', () => {
   it('diffRun は新規/更新/変更なし/失敗に分ける', () => {
     expect(diffRun({ 'a.md': 'done', 'b.md': 'created' }, state)).toEqual({ created: [], updated: ['b.md'], unchanged: ['a.md'], failed: ['c.md'] });
     expect(diffRun({}, state).created.sort()).toEqual(['a.md', 'b.md']);
+    // 本文を置き換えた（contentHash が変わった）done → done は「更新」
+    const st2 = { ...state, notes: { 'a.md': { status: 'done' as const, contentHash: 'new' } } };
+    expect(diffRun({ 'a.md': { status: 'done', contentHash: 'old' } }, st2).updated).toEqual(['a.md']);
+    expect(diffRun({ 'a.md': { status: 'done', contentHash: 'new' } }, st2).unchanged).toEqual(['a.md']);
   });
 
   it('レンダリングに実行メタ・今回の差分・ページURL一覧を含む', () => {
