@@ -261,3 +261,19 @@ describe('Bases / Excalidraw の扱い（#78）', () => {
     expect(inv.skipped[0]?.reason).toContain('.canvas');
   });
 });
+
+describe('wikilink 解析の複数パイプ（#103）', () => {
+  it('![[img.png|alt|300]] は添付として数えられる', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-scan-pipe-'));
+    try {
+      await fs.writeFile(path.join(dir, 'A.md'), '![[pic.png|alt|300]]\n| [[B\\|x]] |\n');
+      await fs.writeFile(path.join(dir, 'B.md'), 'b');
+      await fs.writeFile(path.join(dir, 'pic.png'), Buffer.from([1]));
+      const inv = await scanVault(dir);
+      expect(inv.attachments.map((a) => a.targetPath)).toEqual(['pic.png']);
+      expect(inv.wikiLinks[0]).toMatchObject({ target: 'B', alias: 'x' });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
