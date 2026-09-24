@@ -167,7 +167,7 @@ Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop /
 | `[[note#heading]]` `[[#heading]]` `[x](note.md#heading)` | **Link to that heading** (page top if the heading is missing; reported) |
 | `[[note#^id]]` | Link to the top of the page (Notion has no block references; recorded in the report) |
 | `![[note]]` `![[note#heading]]` | Link by default. `--embed-mode inline` expands the body (cycles and depth > 2 fall back to a link) |
-| `![[image.png\|300]]` `[doc](a.pdf)` | Uploaded and placed as image / PDF / audio / video / file blocks |
+| `![[image.png\|300]]` `![fig](img/a.png)` `[doc](a.pdf)` `[[sheet.xlsx]]` | Uploaded and placed as image / PDF / audio / video / file blocks. Any format such as docx, xlsx, pptx, zip or csv (types Notion rejects are reported) |
 | `[text](note.md#heading)` | Resolved like a wikilink (`.MD` too) |
 | frontmatter | page_tree: leading metadata callout / database: properties (title, rich_text, number, checkbox, date, multi_select, url) |
 | `icon` `cover` `banner` | Page icon (emoji, URL, vault image) and cover (URL, vault image) |

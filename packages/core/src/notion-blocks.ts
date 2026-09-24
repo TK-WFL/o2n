@@ -1,3 +1,4 @@
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from './attachments.js';
 export const MAX_PAYLOAD_BYTES = 450_000; // §4.2の500KB上限にマージンを取る
 export const MAX_BLOCKS_PER_CHUNK = 900; // 1000ブロック上限にマージン
 
@@ -217,9 +218,9 @@ export function shouldUseAsyncWrite(markdown: string): boolean {
   return byteLength(markdown) > MAX_PAYLOAD_BYTES * 2;
 }
 
-const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp']);
-const AUDIO_EXT = new Set(['mp3', 'wav', 'm4a', 'ogg', 'flac']);
-const VIDEO_EXT = new Set(['mp4', 'mov', 'webm', 'mkv']);
+const IMAGE_EXT = IMAGE_EXTENSIONS;
+const AUDIO_EXT = AUDIO_EXTENSIONS;
+const VIDEO_EXT = VIDEO_EXTENSIONS;
 
 export type AttachmentBlockType = 'image' | 'pdf' | 'audio' | 'video' | 'file';
 

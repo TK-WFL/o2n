@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { extensionOf, isFileExtension, MEDIA_EXTENSIONS } from './attachments.js';
 import type { ConversionResult, ReportEntry } from './types.js';
 
 /**
@@ -508,12 +509,6 @@ function makeFilePlaceholder(): string {
 // alias側から `|` を除外しているのも同じ理由（aliasに `|` は現れない）。
 const WIKILINK_RE = /(!?)\[\[([^[\]|#]*)(?:#(\^?[^[\]|]+))?(?:\|([^[\]]*))?\]\]/g;
 
-const ATTACHMENT_EXTENSIONS = new Set([
-  'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp',
-  'pdf',
-  'mp3', 'wav', 'm4a', 'ogg', 'flac',
-  'mp4', 'mov', 'webm', 'mkv',
-]);
 
 /**
  * ATX 見出しの閉じ `#`（`## 見出し ##`）を取り除く。`## C#` のように空白を挟まない `#` は残す。
@@ -620,7 +615,7 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
     // 添付では末尾の数値（幅）や `WxH` を捨て、残りを alt とする。ノートリンクでは全体を表示名にする
     const aliasParts = (aliasRaw ?? '').split('|').map((s) => s.replace(/\\$/, '').trim());
     const alias = aliasRaw === undefined ? undefined : aliasParts.filter((s) => !/^\d+(x\d+)?$/.test(s)).join('|') || undefined;
-    const ext = target.includes('.') ? target.split('.').pop()!.toLowerCase() : '';
+    const ext = extensionOf(target);
 
     if (target === '') {
       // 同じノート内へのリンク `[[#見出し]]` / `[[#^id]]`（#141）。以前は正規表現に一致せず `[[#…]]` の
@@ -642,14 +637,22 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
       return placeholder;
     }
 
-    if (isEmbed && ATTACHMENT_EXTENSIONS.has(ext)) {
+    if (isFileExtension(ext)) {
+      // 添付（#145）: 画像・PDF 等の埋め込みに加え、docx/xlsx/zip 等も vault に実在すればファイルブロックにする
       const resolved = ctx.resolveAttachment(target);
-      const placeholder = makeFilePlaceholder();
-      pendingFiles.push({ placeholder, targetPath: resolved, fallbackText: raw });
-      if (!resolved) {
-        entries.push({ category: 'warning', path: ctx.sourcePath, message: `添付ファイル "${target}" が見つかりませんでした` });
+      if (resolved) {
+        const placeholder = makeFilePlaceholder();
+        pendingFiles.push({ placeholder, targetPath: resolved, fallbackText: raw });
+        // 埋め込みでないリンク（`[[表.xlsx]]`）は文中の表示を残す（ファイルブロックはその段落の直後に入る）
+        return isEmbed ? placeholder : `${alias?.trim() || path.posix.basename(target)}${placeholder}`;
       }
-      return placeholder;
+      if (isEmbed && MEDIA_EXTENSIONS.has(ext)) {
+        // 見つからない添付は元の表記のまま残す。以前はプレースホルダーを出していたが Pass3 で置き換えられず、
+        // `⟦o2n-file-N⟧` が Notion 上にそのまま残っていた
+        entries.push({ category: 'warning', path: ctx.sourcePath, message: `添付ファイル "${target}" が見つかりませんでした` });
+        return raw;
+      }
+      // 見つからない非メディアのリンク（[[資料.docx]]）は従来通りノートリンクとして扱う（未解決として報告される）
     }
 
     if (isEmbed && !ext) {
@@ -716,8 +719,14 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
 // リンク先は CommonMark の `<スペース入り パス>` 形式と、末尾の `"タイトル"` も受け付ける（#141）。
 // 各選択肢の文字集合が排他（`<…>` は `>` を含まない、裸のパスは空白と `)` を含まない）でバックトラックしない
 const MD_DEST = String.raw`\((?:<([^<>\n]+)>|([^)\s<]+))(?:[ \t]+"[^"\n]*")?\)`;
-const MD_IMAGE_RE = new RegExp(String.raw`!\[([^[\]]*)\]` + MD_DEST, 'g');
-const MD_LINK_RE = new RegExp(String.raw`\[([^[\]]+)\]` + MD_DEST, 'g');
+export const MD_IMAGE_RE = new RegExp(String.raw`!\[([^[\]]*)\]` + MD_DEST, 'g');
+export const MD_LINK_RE = new RegExp(String.raw`\[([^[\]]+)\]` + MD_DEST, 'g');
+
+/** Markdown 形式の相対パスを、ノートのフォルダ基準 → ファイル名 の順で解決する */
+function resolveRelativeAttachment(ctx: ConverterContext, target: string): string | null {
+  const relative = path.posix.normalize(path.posix.join(path.posix.dirname(ctx.sourcePath), target));
+  return ctx.resolveAttachment(relative) ?? ctx.resolveAttachment(target) ?? ctx.resolveAttachment(path.posix.basename(target));
+}
 
 function safeDecode(s: string): string {
   try {
@@ -737,34 +746,41 @@ function convertMarkdownLinksAndImages(
   let result = text.replace(MD_IMAGE_RE, (raw, alt, angled: string | undefined, bare: string | undefined) => {
     const url = angled ?? bare ?? '';
     if (/^https?:\/\//i.test(url)) return raw; // 外部URL画像はそのまま
-    const decoded = decodeURIComponent(url);
-    const resolved = ctx.resolveAttachment(decoded) ?? ctx.resolveAttachment(path.posix.basename(decoded));
-    const placeholder = makeFilePlaceholder();
-    pendingFiles.push({ placeholder, targetPath: resolved, fallbackText: raw });
+    const decoded = safeDecode(url);
+    const resolved = resolveRelativeAttachment(ctx, decoded);
     if (!resolved) {
       entries.push({ category: 'warning', path: ctx.sourcePath, message: `画像 "${decoded}" が見つかりませんでした` });
+      return raw; // プレースホルダーを残さない（上の wikilink と同じ理由）
     }
+    const placeholder = makeFilePlaceholder();
+    pendingFiles.push({ placeholder, targetPath: resolved, fallbackText: raw });
     return placeholder;
   });
 
-  result = result.replace(MD_LINK_RE, (raw, text_: string, angled: string | undefined, bare: string | undefined) => {
+  result = result.replace(MD_LINK_RE, (raw, text_: string, angled: string | undefined, bare: string | undefined, offset: number, whole: string) => {
+    // 解決できず元の表記のまま残した画像 `![a](x.png)` の中の `[a](x.png)` を二重に処理しない
+    if (offset > 0 && whole[offset - 1] === '!') return raw;
     const url = angled ?? bare ?? '';
     if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('#')) return raw; // 外部URL（スキーム付き）/ページ内アンカーはそのまま
     // `note.md#見出し` の見出し部分は Notion のページ先頭リンクに降格する（wikilink の見出しリンクと同じ扱い、#109）
     const hashIdx = url.indexOf('#');
     const pathPart = hashIdx === -1 ? url : url.slice(0, hashIdx);
     const decoded = decodeURIComponent(pathPart);
-    const ext = decoded.includes('.') ? decoded.split('.').pop()!.toLowerCase() : '';
+    const ext = extensionOf(decoded);
 
-    if (ATTACHMENT_EXTENSIONS.has(ext)) {
-      // 埋め込みではない添付へのリンク `[資料](files/a.pdf)` もアップロードしてファイルブロックにする（#109）
-      const resolved = ctx.resolveAttachment(decoded) ?? ctx.resolveAttachment(path.posix.basename(decoded));
-      const placeholder = makeFilePlaceholder();
-      pendingFiles.push({ placeholder, targetPath: resolved, fallbackText: raw });
-      if (!resolved) {
+    if (isFileExtension(ext)) {
+      // 埋め込みではない添付へのリンク `[資料](files/a.pdf)` もアップロードしてファイルブロックにする（#109, #145）
+      const resolved = resolveRelativeAttachment(ctx, decoded);
+      if (resolved) {
+        const placeholder = makeFilePlaceholder();
+        pendingFiles.push({ placeholder, targetPath: resolved, fallbackText: raw });
+        // リンクの文字（`[PDF はこちら](a.pdf)` の「PDF はこちら」）は文中に残す
+        return `${text_}${placeholder}`;
+      }
+      if (MEDIA_EXTENSIONS.has(ext)) {
         entries.push({ category: 'warning', path: ctx.sourcePath, message: `添付ファイル "${decoded}" が見つかりませんでした` });
       }
-      return placeholder;
+      return raw;
     }
 
     if (ext !== 'md') return raw; // md形式内部リンクのみ対象（拡張子は大文字小文字を区別しない）

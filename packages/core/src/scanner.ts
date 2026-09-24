@@ -1,6 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import matter from '@11ty/gray-matter';
+import { extensionOf, isFileExtension, MEDIA_EXTENSIONS } from './attachments.js';
+import { MD_IMAGE_RE, MD_LINK_RE } from './converter.js';
 import type {
   AttachmentRef,
   NoteRecord,
@@ -13,13 +15,6 @@ import type {
 const EXCLUDED_DIRS = new Set(['.obsidian', '.trash', '.o2n', 'node_modules']);
 /** `.` で始まるディレクトリ（.git 等）は Obsidian も表示しないため走査しない（#108） */
 const isHiddenDir = (name: string): boolean => name.startsWith('.');
-
-const ATTACHMENT_EXTENSIONS = new Set([
-  'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp',
-  'pdf',
-  'mp3', 'wav', 'm4a', 'ogg', 'flac',
-  'mp4', 'mov', 'webm', 'mkv',
-]);
 
 /** 変換対象外の Obsidian 固有ファイル形式と、レポートに出す理由 */
 const NON_CONVERTIBLE_EXTENSIONS: Record<string, string> = {
@@ -271,6 +266,25 @@ export function resolveByFilename(
   };
 }
 
+/** Markdown 形式の画像・リンクのうち、ローカルのファイルを指すもの: [生表記, 画像か, リンク先] */
+function markdownFileRefs(content: string): Array<[string, boolean, string]> {
+  const out: Array<[string, boolean, string]> = [];
+  for (const m of content.matchAll(MD_IMAGE_RE)) out.push([m[0], true, m[2] ?? m[3] ?? '']);
+  for (const m of content.matchAll(MD_LINK_RE)) {
+    if (m.index !== undefined && m.index > 0 && content[m.index - 1] === '!') continue; // 画像は上で処理済み
+    out.push([m[0], false, m[2] ?? m[3] ?? '']);
+  }
+  return out.filter(([, , url]) => url !== '' && !/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith('#')).map(([r, i, u]) => [r, i, u.split('#')[0]!]);
+}
+
+function safeDecodeUri(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 export async function scanVault(vaultPath: string): Promise<VaultInventory> {
   const allFiles: string[] = [];
   await walk(vaultPath, vaultPath, allFiles);
@@ -364,21 +378,17 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
     }
 
     for (const link of parseWikiLinks(content)) {
-      const linkExt = link.target.includes('.')
-        ? link.target.split('.').pop()!.toLowerCase()
-        : '';
-      const isAttachment = link.isEmbed && ATTACHMENT_EXTENSIONS.has(linkExt);
-
-      if (isAttachment) {
+      const linkExt = extensionOf(link.target);
+      // 添付: 画像・PDF 等の埋め込みは見つからなくても添付扱い。それ以外の拡張子（docx 等）は、
+      // 埋め込み・リンクを問わず vault に実在すれば添付（#145）。見つからなければ従来通りノートリンク扱い
+      if (isFileExtension(linkExt)) {
         const { resolved, warning } = resolveByFilename(link.target, relPath, attachmentIndex);
-        if (warning) warnings.push(warning);
-        attachments.push({
-          sourcePath: relPath,
-          targetPath: resolved,
-          raw: link.raw,
-          extension: linkExt,
-        });
-        continue;
+        if (resolved || (link.isEmbed && MEDIA_EXTENSIONS.has(linkExt))) {
+          // 見つからない添付は converter が報告するので、ここでは曖昧さだけを報告する（二重報告を避ける）
+          if (warning?.reason === 'ambiguous') warnings.push(warning);
+          attachments.push({ sourcePath: relPath, targetPath: resolved, raw: link.raw, extension: linkExt });
+          continue;
+        }
       }
 
       wikiLinks.push({
@@ -390,6 +400,19 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
         isEmbed: link.isEmbed,
         raw: link.raw,
       });
+    }
+
+    // Markdown 形式の画像・リンク（`![a](img/pic.png)`, `[資料](doc.pdf)`）も添付として数える（#157）
+    for (const [raw, isImage, url] of markdownFileRefs(content)) {
+      const decoded = safeDecodeUri(url);
+      const ext = extensionOf(decoded);
+      if (!isFileExtension(ext)) continue;
+      const resolved =
+        resolveByFilename(path.posix.normalize(path.posix.join(path.posix.dirname(relPath), decoded)), relPath, attachmentIndex).resolved ??
+        resolveByFilename(decoded, relPath, attachmentIndex).resolved;
+      if (resolved || (isImage && MEDIA_EXTENSIONS.has(ext))) {
+        attachments.push({ sourcePath: relPath, targetPath: resolved, raw, extension: ext });
+      }
     }
   }
 
@@ -409,6 +432,7 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
   return {
     vaultPath,
     notes,
+    files: allFiles.filter((p) => !p.endsWith('.md')),
     attachments,
     wikiLinks,
     skipped,

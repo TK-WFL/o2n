@@ -168,7 +168,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 | `[[ノート#見出し]]` `[[#見出し]]` `[x](note.md#見出し)` | **その見出しへのリンク**（見出しが無ければページ先頭にして報告） |
 | `[[ノート#^id]]` | ページ先頭へのリンク（Notion にブロック参照が無いため。レポートに記録） |
 | `![[ノート]]` `![[ノート#見出し]]` | 既定はリンク。`--embed-mode inline` で本文を展開（循環・深さ 3 以上はリンク） |
-| `![[画像.png\|300]]` `[資料](a.pdf)` | アップロードして元の位置に画像 / PDF / 音声 / 動画 / ファイルブロック |
+| `![[画像.png\|300]]` `![図](img/a.png)` `[資料](a.pdf)` `[[表.xlsx]]` | アップロードして元の位置に画像 / PDF / 音声 / 動画 / ファイルブロック。docx・xlsx・pptx・zip・csv など任意の形式に対応（Notion が受け付けない形式はレポートに記録） |
 | `[テキスト](note.md#見出し)` | wikilink と同じ解決（`.MD` も可） |
 | frontmatter | page_tree: 冒頭のメタ callout / database: プロパティ（title・rich_text・number・checkbox・date・multi_select・url） |
 | `icon` `cover` `banner` | ページのアイコン（絵文字・URL・vault 内画像）・カバー（URL・vault 内画像） |
