@@ -28,6 +28,7 @@ import {
   rateLimitFromEnv,
   deepVerifyNotes,
   summarizeState,
+  noteConcurrencyFromEnv,
 } from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
 import { cancelJob, getJob, loadJob, MAX_CONCURRENT_JOBS, registerController, releaseController, runningJobCount, setJob } from './jobs.js';
@@ -261,6 +262,7 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
           api,
           state,
           dryRun,
+          concurrency: noteConcurrencyFromEnv(),
           onProgress: (done, total, currentPath) => {
             setJob(resolved, { status: 'running', done, total, currentPath, startedAt: getJob(resolved)?.startedAt ?? Date.now() });
           },

@@ -22,6 +22,14 @@ const DEFAULT_RETRY: RetryOptions = {
  * 既定の 2 req/秒はどのプランでも安全側。Business 以上では上げて移行時間を短縮できる。
  * 不正な値は無視して既定にフォールバックする。
  */
+/**
+ * 移行でノートを同時に処理する数（#144）。レート設定と同じ値にする（既定 2）。実際の API 頻度は
+ * NotionClient のレート制御が上限になるので、これ以上増やしても速くはならない
+ */
+export function noteConcurrencyFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return rateLimitFromEnv(env)?.intervalCap ?? 2;
+}
+
 export function rateLimitFromEnv(env: NodeJS.ProcessEnv = process.env): Partial<RateLimitOptions> | undefined {
   const raw = env.O2N_REQUESTS_PER_SECOND;
   if (raw === undefined || raw === '') return undefined;

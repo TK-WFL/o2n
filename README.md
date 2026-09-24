@@ -194,7 +194,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 ## ⏱ 所要時間と制限
 
 - **目安**: 1,000 ノート＋500 添付 ≒ API 呼び出し 4,000〜5,000 回 ≒ 約 30〜40 分（既定 2 req/秒）
-- Business プラン以上なら `O2N_REQUESTS_PER_SECOND=8`（1〜10）で短縮できます。429 は `Retry-After` に従って自動で待ちます
+- Business プラン以上なら `O2N_REQUESTS_PER_SECOND=8`（1〜10）で短縮できます。ノートは同じ数だけ並行に処理されます（ページの並び順は保たれます）。429 は `Retry-After` に従って自動で待ちます
 - **Notion Free プランのブロック上限**（2026 年 9 月〜）: 複数メンバーの Free ワークスペースは生涯 1,000 ブロックが API にも適用されます（[公式リファレンス](https://developers.notion.com/reference/workspace-block-limits)）。`scan` / `plan` が推定ブロック数で事前警告し、上限に達した場合は即座に中断して `resume` で再開できます。PAT・有料プラン・メンバー 1 人の Free は対象外です
 
 ---
