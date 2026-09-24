@@ -40,10 +40,12 @@ describe('convertNote §6 変換表', () => {
     expect(result.pendingLinks[0]?.displayText).toBe('表示名');
   });
 
-  it('[[ノート#見出し]] はページ先頭リンクに降格しレポートされる', () => {
+  it('[[ノート#見出し]] は見出しを pendingLink に持たせる（Pass2 で解決、#143）', () => {
     const result = convertNote('[[Note B#見出し1]]', ctx());
     expect(result.pendingLinks[0]?.displayText).toBe('Note B > 見出し1');
-    expect(result.entries.some((e) => e.category === 'downgraded' && e.message.includes('見出しリンク'))).toBe(true);
+    // 見出しは Pass2 で見出しブロックへのリンクにする（#143）。変換時点では降格を報告しない
+    expect(result.pendingLinks[0]).toMatchObject({ heading: '見出し1', mentionable: false });
+    expect(result.entries.some((e) => e.category === 'downgraded')).toBe(false);
   });
 
   it('[[ノート#^ブロックID]] はページ先頭リンクに降格しレポートされる', () => {
@@ -416,11 +418,12 @@ describe('コードブロックをまたぐコメント（#106）', () => {
 });
 
 describe('md形式リンクの取りこぼし（#109）', () => {
-  it('[x](note.md#見出し) は解決され、見出し部分はページ先頭リンクに降格として報告される', () => {
+  it('[x](note.md#見出し) は解決され、見出しを pendingLink に持たせる（#143）', () => {
     const r = convertNote('[x](Note%20B.md#h1)', ctx());
     expect(r.markdown).toBe('⟦o2n-link-0⟧');
     expect(r.pendingLinks[0]).toMatchObject({ targetPath: 'Target.md', displayText: 'x' });
-    expect(r.entries.some((e) => e.category === 'downgraded' && e.message.includes('見出しリンク'))).toBe(true);
+    expect(r.pendingLinks[0]?.heading).toBe('h1');
+    expect(r.entries.some((e) => e.category === 'downgraded')).toBe(false);
   });
 
   it('拡張子は大文字小文字を区別しない（Note.MD）', () => {

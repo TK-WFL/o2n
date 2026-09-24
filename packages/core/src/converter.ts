@@ -21,6 +21,13 @@ export interface PendingLink {
   fallbackText: string;
   /** Pass2で解決済み時に使う表示名 */
   displayText: string;
+  /** `[[ノート#見出し]]` の見出し。Pass2 でリンク先ページの見出しブロックへのリンクにする（#143） */
+  heading?: string;
+  /**
+   * 表示名がノート名そのもの（別名・見出し・任意テキストが無い）。Pass2 で Notion のページメンションに
+   * できる（メンションは独自の表示名を持てないため、表示名があるリンクは URL リンクのまま、#142）
+   */
+  mentionable?: boolean;
 }
 
 export interface PendingFile {
@@ -624,9 +631,14 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
         entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `同じノート内の埋め込み "![[#${anchor}]]" は文字として残しました` });
         return label;
       }
-      entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `同じノート内のリンク "[[#${anchor}]]" はページ先頭リンクに降格しました` });
       const placeholder = makeLinkPlaceholder();
-      pendingLinks.push({ placeholder, targetPath: ctx.sourcePath, fallbackText: label, displayText: label });
+      if (anchor.startsWith('^')) {
+        entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `同じノート内のブロック参照 "[[#${anchor}]]" はページ先頭リンクに降格しました` });
+        pendingLinks.push({ placeholder, targetPath: ctx.sourcePath, fallbackText: label, displayText: label });
+      } else {
+        // 見出しへのリンクは Pass2 で見出しブロックを探して解決する（見つからなければ Pass2 が降格を報告、#143）
+        pendingLinks.push({ placeholder, targetPath: ctx.sourcePath, fallbackText: label, displayText: label, heading: anchor });
+      }
       return placeholder;
     }
 
@@ -670,15 +682,14 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
 
     // 通常のノートリンク（見出し/ブロック参照/エイリアス対応）
     let displayText = alias?.trim() || target;
-    let degraded = false;
+    let heading: string | undefined;
     if (anchor) {
       if (anchor.startsWith('^')) {
-        degraded = true;
         entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `ブロック参照 "[[${target}#${anchor}]]" はページ先頭リンクに降格しました` });
       } else {
-        degraded = true;
+        // 見出しリンクは Pass2 で見出しブロックへのリンクにする（見つからなければ Pass2 が降格を報告、#143）
+        heading = anchor;
         if (!alias) displayText = `${target} > ${anchor}`;
-        entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `見出しリンク "[[${target}#${anchor}]]" はページ先頭リンクに降格しました` });
       }
     }
 
@@ -689,11 +700,12 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
       targetPath: resolved,
       fallbackText: alias ? `[[${target}|${alias}]]` : (anchor ? `[[${target}#${anchor}]]` : `[[${target}]]`),
       displayText,
+      ...(heading ? { heading } : {}),
+      mentionable: !alias && !anchor,
     });
     if (!resolved) {
       entries.push({ category: 'unresolved_link', path: ctx.sourcePath, message: `リンク先 "${target}" が見つかりませんでした` });
     }
-    void degraded;
     return placeholder;
   });
 }
@@ -706,6 +718,14 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
 const MD_DEST = String.raw`\((?:<([^<>\n]+)>|([^)\s<]+))(?:[ \t]+"[^"\n]*")?\)`;
 const MD_IMAGE_RE = new RegExp(String.raw`!\[([^[\]]*)\]` + MD_DEST, 'g');
 const MD_LINK_RE = new RegExp(String.raw`\[([^[\]]+)\]` + MD_DEST, 'g');
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
 
 function convertMarkdownLinksAndImages(
   text: string,
@@ -748,12 +768,11 @@ function convertMarkdownLinksAndImages(
     }
 
     if (ext !== 'md') return raw; // md形式内部リンクのみ対象（拡張子は大文字小文字を区別しない）
-    if (hashIdx !== -1) {
-      entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `見出しリンク "${raw}" はページ先頭リンクに降格しました` });
-    }
+    // `note.md#見出し` の見出しは Pass2 で見出しブロックへのリンクにする（#143）
+    const heading = hashIdx !== -1 ? safeDecode(url.slice(hashIdx + 1)) : undefined;
     const resolved = ctx.resolveNoteLink(decoded) ?? ctx.resolveNoteLink(path.posix.basename(decoded));
     const placeholder = makeLinkPlaceholder();
-    pendingLinks.push({ placeholder, targetPath: resolved, fallbackText: raw, displayText: text_ });
+    pendingLinks.push({ placeholder, targetPath: resolved, fallbackText: raw, displayText: text_, ...(heading ? { heading } : {}) });
     if (!resolved) {
       entries.push({ category: 'unresolved_link', path: ctx.sourcePath, message: `md形式リンク先 "${decoded}" が見つかりませんでした` });
     }

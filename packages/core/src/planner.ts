@@ -10,6 +10,8 @@ export interface PlannerOptions {
   skipList?: string[];
   /** ノート埋め込みの扱い（#80）。省略時は plan に書かず 'link' 相当 */
   embedMode?: 'link' | 'inline';
+  /** ノート間リンクの形式（#142）。省略時は plan に書かず mention 相当 */
+  linkStyle?: 'mention' | 'link';
 }
 
 /**
@@ -71,6 +73,7 @@ export function buildPlan(inventory: VaultInventory, opts: PlannerOptions): Migr
     frontmatterMappings,
     skipList: opts.skipList ?? inventory.skipped.map((s) => s.path),
     ...(opts.embedMode ? { embedMode: opts.embedMode } : {}),
+    ...(opts.linkStyle ? { linkStyle: opts.linkStyle } : {}),
   };
 }
 
