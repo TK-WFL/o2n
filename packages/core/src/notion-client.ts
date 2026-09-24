@@ -66,6 +66,24 @@ function isBlockLimitBody(body: unknown): boolean {
   return b?.code === 'restricted_resource' && typeof b.additional_data?.block_limit === 'string';
 }
 
+const BEFORE_SEND_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
+
+function causeCode(err: unknown): string | undefined {
+  const cause = (err as { cause?: { code?: unknown } } | undefined)?.cause;
+  const code = cause?.code ?? (err as { code?: unknown } | undefined)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/** fetch が投げた例外を「送信前に失敗（再送しても安全）」「送信後かもしれない」「通信以外」に分類する */
+export function classifyNetworkError(err: unknown): 'before-send' | 'ambiguous' | 'other' {
+  const code = causeCode(err);
+  if (code && BEFORE_SEND_CODES.has(code)) return 'before-send';
+  const name = (err as { name?: unknown } | undefined)?.name;
+  if (name === 'TimeoutError' || name === 'AbortError') return 'ambiguous';
+  if (err instanceof TypeError || code) return 'ambiguous'; // undici の "fetch failed"（ECONNRESET, UND_ERR_SOCKET 等）
+  return 'other';
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -92,6 +110,9 @@ const DEFAULT_RATE_LIMIT: RateLimitOptions = {
 };
 
 export interface NotionClientOptions {
+  /** 1リクエストのタイムアウト（ミリ秒）。既定 60 秒、ファイル送信（multipart）は既定 5 分 */
+  timeoutMs?: number;
+  uploadTimeoutMs?: number;
   token: string;
   dryRun?: boolean;
   fetchImpl?: typeof fetch;
@@ -132,6 +153,8 @@ export class NotionClient {
   private readonly fetchImpl: typeof fetch;
   private readonly notionVersion: string;
   private readonly retry: RetryOptions;
+  private readonly timeoutMs: number;
+  private readonly uploadTimeoutMs: number;
 
   constructor(opts: NotionClientOptions) {
     this.token = opts.token;
@@ -139,6 +162,8 @@ export class NotionClient {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.notionVersion = opts.notionVersion ?? NOTION_VERSION;
     this.retry = { ...DEFAULT_RETRY, ...opts.retry };
+    this.timeoutMs = opts.timeoutMs ?? 60_000;
+    this.uploadTimeoutMs = opts.uploadTimeoutMs ?? 300_000;
     const rateLimit = { ...DEFAULT_RATE_LIMIT, ...opts.rateLimit };
     this.queue = new PQueue({
       concurrency: rateLimit.concurrency,
@@ -186,17 +211,36 @@ export class NotionClient {
     attempt = 0,
   ): Promise<T> {
     this.callCount += 1;
-    const res = await this.fetchImpl(req.url, {
-      method: req.method,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        'Notion-Version': this.notionVersion,
-        ...req.headers,
-      },
-      body: req.body,
-    });
+    let res: Response;
+    try {
+      res = await this.fetchImpl(req.url, {
+        method: req.method,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Notion-Version': this.notionVersion,
+          ...req.headers,
+        },
+        body: req.body,
+        signal: AbortSignal.timeout(req.body instanceof FormData ? this.uploadTimeoutMs : this.timeoutMs),
+      });
+    } catch (err) {
+      // 通信エラー（#138）: 以前は再試行せずそのノートが即 failed になり、応答の無い接続では無期限に止まっていた。
+      // 接続確立前の失敗（DNS・接続拒否等）はどのメソッドでも安全に再試行できる。送信後の切断・タイムアウトは
+      // Notion 側で処理済みの可能性があり、POST /pages や追記を再送すると重複するため、冪等な GET/DELETE のみ再試行する
+      const kind = classifyNetworkError(err);
+      if (kind === 'other') throw err;
+      const retryable = kind === 'before-send' || (kind === 'ambiguous' && (req.method === 'GET' || req.method === 'DELETE'));
+      if (!retryable || attempt >= this.retry.maxRetries) {
+        const detail = err instanceof Error ? `${err.name}: ${err.message}${causeCode(err) ? ` (${causeCode(err)})` : ''}` : String(err);
+        const hint = kind === 'ambiguous' && !retryable ? '（送信後に切断されたため、重複を避けて再送していません。resume で再実行してください）' : '';
+        throw new NotionApiError(0, 'network_error', `Notion API への通信に失敗しました: ${detail}${hint}`, undefined);
+      }
+      await sleep(Math.min(this.retry.maxDelayMs, this.retry.initialDelayMs * 2 ** attempt) + Math.random() * 250);
+      return this.executeWithRetry<T>(req, attempt + 1);
+    }
 
-    if (res.status === 429 || res.status >= 500) {
+    // 409 conflict_error は Notion が「再試行してよい」と案内している一時的な競合
+    if (res.status === 429 || res.status === 409 || res.status >= 500) {
       if (attempt >= this.retry.maxRetries) {
         const body = await safeJson(res);
         const b = body as { code?: string; additional_data?: { rate_limit_reason?: string } } | undefined;
