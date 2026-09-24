@@ -342,6 +342,14 @@ export class NotionApi {
     return this.client.request({ method: 'PATCH', path: `/pages/${pageId}`, body: { properties, ...extra } });
   }
 
+  /** ページを別の親へ移動する（Move page API、2026-01）。親はページまたはデータソース */
+  async movePage(
+    pageId: string,
+    parent: { type: 'page_id'; page_id: string } | { type: 'data_source_id'; data_source_id: string },
+  ): Promise<{ id: string }> {
+    return this.client.request({ method: 'POST', path: `/pages/${pageId}/move`, body: { parent } });
+  }
+
   async getPage(pageId: string): Promise<{ id: string; in_trash?: boolean; url?: string }> {
     return this.client.request({ method: 'GET', path: `/pages/${pageId}` });
   }

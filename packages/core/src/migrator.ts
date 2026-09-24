@@ -328,6 +328,60 @@ async function createFolderContainers(
   return containers;
 }
 
+/**
+ * ノートの移動・改名を検知する（#147）。以前は旧パスが孤立ページ、新パスが新規ページになっていた。
+ * 「state にあるが vault から消えたノート」と「vault にあるが state に無いノート」の内容の指紋が一致し、
+ * かつその指紋がどちらの側でも一意なときに限り同じノートとみなし、Notion 上の同じページを新しいフォルダへ
+ * 移動（Move page API）・改名して state を引き継ぐ。内容も変えた場合や、空のノートのように指紋が
+ * 重複する場合は判別できないので、従来通り新規作成＋孤立ページとして扱う。
+ * データベース（行）との間の移動はプロパティの扱いが変わるため対象外。
+ */
+async function reconcileMoves(opts: MigratorOptions, containers: Map<string, Container>, report: ReportEntry[]): Promise<void> {
+  const { inventory, state, api, dryRun, plan } = opts;
+  const present = new Set(inventory.notes.map((n) => n.path));
+  const orphans = Object.entries(state.snapshot.notes).filter(
+    ([p, n]) => !present.has(p) && n.pageId && n.contentHash && n.status !== 'skipped' && n.status !== 'failed',
+  );
+  const newcomers = inventory.notes.filter((n) => !state.getNote(n.path));
+  if (orphans.length === 0 || newcomers.length === 0) return;
+
+  const count = (keys: string[]) => keys.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map<string, number>());
+  const orphanHashes = count(orphans.map(([, n]) => n.contentHash!));
+  const prints = newcomers.map((note) => ({ note, fp: noteFingerprint(inventory, note, plan.embedMode), legacy: contentHash(note.content) }));
+  const newcomerHashes = count(prints.flatMap((x) => [x.fp, x.legacy]));
+
+  for (const { note, fp, legacy } of prints) {
+    const matches = orphans.filter(([, n]) => n.contentHash === fp || n.contentHash === legacy);
+    if (matches.length !== 1) continue;
+    const [oldPath, old] = matches[0]!;
+    if ((orphanHashes.get(old.contentHash!) ?? 0) !== 1 || (newcomerHashes.get(old.contentHash!) ?? 0) !== 1) continue;
+
+    const newFolder = folderOf(note.path);
+    const oldFolder = folderOf(oldPath);
+    const target = containers.get(newFolder) ?? { kind: 'page' as const, id: plan.parentPageId };
+    const oldWasRow = state.getFolder(oldFolder)?.kind === 'database';
+    if (target.kind === 'database' || oldWasRow) continue;
+
+    const renamed = basenameNoExt(oldPath) !== basenameNoExt(note.path) && !note.frontmatter.title;
+    const message = `"${oldPath}" → "${note.path}": Notion 上の同じページを${newFolder !== oldFolder ? '移動' : ''}${newFolder !== oldFolder && renamed ? '・' : ''}${renamed ? '改名' : ''}しました`;
+    if (dryRun) {
+      report.push({ category: 'moved', path: note.path, message: `${message}（dry-run のため実行していません）` });
+      continue;
+    }
+    try {
+      if (newFolder !== oldFolder) await api.movePage(old.pageId!, { type: 'page_id', page_id: target.id });
+      if (renamed) await api.updatePageProperties(old.pageId!, { title: buildTitleProperty(pageTitle(undefined, basenameNoExt(note.path))) });
+    } catch (err) {
+      if (err instanceof NotionBlockLimitError) throw err;
+      report.push({ category: 'warning', path: note.path, message: `"${oldPath}" からの移動・改名を反映できなかったため、新しいページとして作成します: ${String(err)}` });
+      continue;
+    }
+    await state.setNote(note.path, { ...old });
+    await state.deleteNote(oldPath);
+    report.push({ category: 'moved', path: note.path, message });
+  }
+}
+
 async function runPass1(
   opts: MigratorOptions,
   containers: Map<string, Container>,
@@ -1076,6 +1130,7 @@ export async function runMigration(opts: MigratorOptions): Promise<ReportEntry[]
 
   try {
     const containers = await createFolderContainers(opts, report);
+    await reconcileMoves(opts, containers, report);
     await runPass1(opts, containers, report);
     await runPass2(opts, report);
     await resolveDeferredLinks(opts, report);

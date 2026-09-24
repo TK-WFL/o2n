@@ -81,6 +81,7 @@ npx @tk_wfl/o2n-cli verify  <vaultのパス> --deep      # Notion の実ペー�
 | `verify <vault>` | state と vault の突き合わせ。`--deep` で Notion の実ページとも照合 | `--deep` `--json` |
 | `report <vault>` | 最新のレポート（`.o2n/report.md`）を表示 | |
 
+- 移行後にノートを別フォルダへ移動・改名しても、`resume` で検知して Notion 上の同じページを移動・改名します（内容も同時に変えた場合は新しいページとして作成）
 - `migrate --dry-run` のレポートは `.o2n/report.dry-run.md` に書かれ、本番の `report.md` を上書きしません
 - `--embed-mode inline`: `![[ノート]]` の埋め込みを、リンクではなく本文にその場で展開します（`![[ノート#見出し]]` はそのセクションのみ）
 - 終了コード: `0` 全件成功 / `1` 一部失敗・不一致あり / `2` 致命的エラー
