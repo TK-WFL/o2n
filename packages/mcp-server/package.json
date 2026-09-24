@@ -1,6 +1,6 @@
 {
   "name": "@tk_wfl/o2n-mcp-server",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "o2n（Obsidian→Notion移行ツール）のローカルMCPサーバー",
   "type": "module",
   "license": "MIT",
@@ -36,7 +36,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@tk_wfl/o2n-core": "^0.5.0",
+    "@tk_wfl/o2n-core": "^0.6.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.6.2"
   },
