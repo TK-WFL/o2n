@@ -354,6 +354,14 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
     const dirKey = dir === '.' ? '' : dir;
     folderTree[dirKey] = folderTree[dirKey] ?? [];
     folderTree[dirKey].push(relPath);
+    // 直下にノートが無い中間フォルダ（Projects/Alpha/a.md の Projects）も登録する。
+    // 登録しないと計画に現れず、Alpha がルート直下に作られて階層が平らになっていた（#135）
+    if (dirKey !== '') {
+      for (let parent = path.posix.dirname(dirKey); parent !== '.'; parent = path.posix.dirname(parent)) {
+        folderTree[parent] = folderTree[parent] ?? [];
+      }
+      folderTree[''] = folderTree[''] ?? [];
+    }
 
     for (const link of parseWikiLinks(content)) {
       const linkExt = link.target.includes('.')

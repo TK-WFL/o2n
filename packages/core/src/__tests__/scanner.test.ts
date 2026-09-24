@@ -334,3 +334,21 @@ describe('ノートの並び順（#112）', () => {
     expect([...input].sort(compareVaultPaths)).toEqual(['A.md', 'b.md', 'note2.md', 'note10.md', 'Sub/a.md', 'Sub/x.md', 'Zed/1.md']);
   });
 });
+
+describe('中間フォルダ（#135）', () => {
+  it('直下にノートが無い祖先フォルダも folderTree に空配列で登録される', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-scan-mid-'));
+    try {
+      await fs.mkdir(path.join(dir, 'A', 'B', 'C'), { recursive: true });
+      await fs.mkdir(path.join(dir, 'P', 'X'), { recursive: true });
+      await fs.writeFile(path.join(dir, 'A', 'B', 'C', 'n.md'), 'x');
+      await fs.writeFile(path.join(dir, 'P', 'X', 'm.md'), 'y');
+      const inv = await scanVault(dir);
+      expect(Object.keys(inv.folderTree).sort()).toEqual(['', 'A', 'A/B', 'A/B/C', 'P', 'P/X']);
+      expect(inv.folderTree['A']).toEqual([]);
+      expect(inv.folderTree['A/B/C']).toEqual(['A/B/C/n.md']);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
