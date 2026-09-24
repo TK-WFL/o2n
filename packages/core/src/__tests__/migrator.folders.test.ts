@@ -33,4 +33,18 @@ describe('中間フォルダの階層（#135）', () => {
     expect(parentOf('Beta')).toBe(projectsId);
     expect(parentOf('a')).toBe(state.snapshot.folders?.['Projects/Alpha']?.notionId);
   });
+
+  it('旧バージョンで子フォルダだけ作成済みの state を resume しても、空の中間フォルダページを後から作らない', async () => {
+    const mock = createMockServer();
+    const first = await setupMigration(tmpDir, mock.fetchImpl);
+    // 旧バージョン相当: Projects を計画から外して移行（Alpha/Beta がルート直下に作成される）
+    first.plan.folders = first.plan.folders.filter((f) => f.folderPath !== 'Projects');
+    await runMigration({ vaultPath: tmpDir, plan: first.plan, inventory: first.inventory, api: first.api, state: first.state, dryRun: false });
+    const before = mock.calls.filter((c) => c.method === 'POST' && c.path === '/pages').length;
+
+    const second = await setupMigration(tmpDir, mock.fetchImpl);
+    await runMigration({ vaultPath: tmpDir, plan: second.plan, inventory: second.inventory, api: second.api, state: second.state, dryRun: false });
+    expect(mock.calls.filter((c) => c.method === 'POST' && c.path === '/pages').length).toBe(before);
+    expect(second.state.snapshot.folders?.['Projects']).toBeUndefined();
+  });
 });

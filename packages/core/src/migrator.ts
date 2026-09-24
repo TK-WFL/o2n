@@ -154,6 +154,18 @@ async function createFolderContainers(
       continue;
     }
 
+    // 直下にノートが無い中間フォルダ（#135）を、以前のバージョンで移行済みの vault の resume で
+    // 後から作ると、既存の子フォルダページはルート直下に残ったまま空のページだけが増える。
+    // 子孫フォルダが既に作成済みなら中間フォルダは作らない（新規移行では正しい階層で作る）
+    const isIntermediate = (opts.inventory.folderTree[folder.folderPath] ?? []).length === 0;
+    if (isIntermediate) {
+      const prefix = `${folder.folderPath}/`;
+      const descendantAlreadyCreated = Object.entries(state.snapshot.folders ?? {}).some(
+        ([p, f]) => p.startsWith(prefix) && f.status === 'created',
+      );
+      if (descendantAlreadyCreated) continue;
+    }
+
     const parentFolderPath = folderOf(folder.folderPath);
     let parentContainer = containers.get(parentFolderPath);
     if (!parentContainer) {
