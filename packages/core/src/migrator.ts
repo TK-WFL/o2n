@@ -6,6 +6,7 @@ import { NotionApiError, NotionBlockLimitError, type NotionApi, type NotionBlock
 import type { StateStore } from './state.js';
 import { contentHash, isNoteUpToDate, stableStringify } from './state.js';
 import { createDatabaseForFolder, buildRowProperties } from './notion-db.js';
+import { mimeTypeFor } from './attachments.js';
 import {
   buildTitleProperty,
   buildFrontmatterMetaCallout,
@@ -96,11 +97,11 @@ function indexesFor(inventory: VaultInventory): ResolverIndexes {
     idx = {
       noteIndex: buildNameIndex(inventory.notes.map((n) => n.path)),
       aliasIndex: buildAliasIndex(inventory.notes),
+      // 添付は vault 内の .md 以外の全ファイルから解決する（#157）。以前は scan 時に ![[…]] で見つかった
+      // 添付だけから作っていたため、Markdown 形式でしか参照されない画像・ファイルが解決できなかった
       fileIndex: buildNameIndex(
-        // 添付は vault 内の非.mdファイル全体から解決（wikiLinks抽出時と同じロジック）
-        inventory.attachments
-          .map((a) => a.targetPath)
-          .filter((p): p is string => p !== null),
+        inventory.files ??
+          inventory.attachments.map((a) => a.targetPath).filter((p): p is string => p !== null),
       ),
     };
     resolverIndexCache.set(inventory, idx);
@@ -645,31 +646,6 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
 }
 
 const SINGLE_PART_LIMIT = 20 * 1024 * 1024;
-
-const MIME_TYPES: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  svg: 'image/svg+xml',
-  webp: 'image/webp',
-  bmp: 'image/bmp',
-  pdf: 'application/pdf',
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-  m4a: 'audio/mp4',
-  ogg: 'audio/ogg',
-  flac: 'audio/flac',
-  mp4: 'video/mp4',
-  mov: 'video/quicktime',
-  webm: 'video/webm',
-  mkv: 'video/x-matroska',
-};
-
-function mimeTypeFor(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
-  return MIME_TYPES[ext] ?? 'application/octet-stream';
-}
 
 /**
  * §16検証済み（2026-07-19）: createFileUpload時にcontent_typeを指定しないと、

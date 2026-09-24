@@ -434,7 +434,7 @@ describe('md形式リンクの取りこぼし（#109）', () => {
     const r = convertNote('[資料](files/a.png) と [外部](https://x/a.pdf) と [メール](mailto:a@b.c)', ctx());
     expect(r.pendingFiles).toHaveLength(1);
     expect(r.pendingFiles[0]?.targetPath).toBe('Attachments/image.png');
-    expect(r.markdown).toBe('⟦o2n-file-0⟧ と [外部](https://x/a.pdf) と [メール](mailto:a@b.c)');
+    expect(r.markdown).toBe('資料⟦o2n-file-0⟧ と [外部](https://x/a.pdf) と [メール](mailto:a@b.c)');
   });
 
   it('解決できない添付リンクは warning、その他の拡張子（.txt 等）はそのまま', () => {

@@ -14,3 +14,4 @@ export * from './vault-guard.js';
 export * from './schemas.js';
 export * from './local-state-io.js';
 export * from './verify.js';
+export * from './attachments.js';

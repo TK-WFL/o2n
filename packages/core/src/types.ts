@@ -60,6 +60,11 @@ export interface SkippedFile {
 export interface VaultInventory {
   vaultPath: string;
   notes: NoteRecord[];
+  /**
+   * vault 内の .md 以外のファイル（除外ディレクトリ・symlink を除く）。添付の名前解決に使う（#157）。
+   * 省略時は attachments から解決する（テスト等で inventory を直接組み立てる場合の後方互換）
+   */
+  files?: string[];
   attachments: AttachmentRef[];
   wikiLinks: WikiLink[];
   skipped: SkippedFile[];
