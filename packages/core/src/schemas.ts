@@ -29,6 +29,7 @@ const noteStateSchema = z.object({
   contentHash: z.string().optional(),
   error: z.string().optional(),
   attachedPlaceholders: z.array(z.string()).optional(),
+  deferredLinks: z.array(z.object({ targetPath: z.string(), text: z.string(), displayText: z.string() })).optional(),
 });
 
 const fileStateSchema = z.object({

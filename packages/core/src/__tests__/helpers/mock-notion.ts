@@ -23,6 +23,7 @@ export function createMockServer() {
   let createCount = 0;
   let failNextLinkPatchWith400 = false;
   let failMarkdownPatchType: string | null = null;
+  let failPageCreateContaining: string | null = null;
   let failNextFileSendWith400 = false;
   let alwaysFailFileSend = false;
 
@@ -83,6 +84,10 @@ export function createMockServer() {
 
     if (method === 'GET' && p === '/users/me') {
       return jsonResponse({ bot: { workspace_limits: { max_file_upload_size_in_bytes: 5 * 1024 * 1024 * 1024 } } });
+    }
+
+    if (method === 'POST' && p === '/pages' && failPageCreateContaining && String((body as { markdown?: string })?.markdown ?? '').includes(failPageCreateContaining)) {
+      return new Response(JSON.stringify({ code: 'validation_error', message: 'boom' }), { status: 400 });
     }
 
     if (method === 'POST' && p === '/pages') {
@@ -175,6 +180,8 @@ export function createMockServer() {
     triggerNextLinkPatch400: () => { failNextLinkPatchWith400 = true; },
     setAlwaysFailFileSend: (v: boolean) => { alwaysFailFileSend = v; },
     setChildrenPageSize: (n: number) => { childrenPageSize = n; },
+    /** markdown に指定文字列を含む POST /pages を 400 にする（null で解除） */
+    failPageCreateContaining: (t: string | null) => { failPageCreateContaining = t; },
     /** 指定 type の PATCH .../markdown を常に 400 にする */
     failMarkdownPatchOfType: (t: string | null) => { failMarkdownPatchType = t; },
     /** 指定回数のブロック作成成功後に Free プランのブロック上限 403 を返し始める（null で解除） */

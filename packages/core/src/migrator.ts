@@ -13,7 +13,7 @@ import {
   shouldUseAsyncWrite,
   buildAttachmentBlock,
 } from './notion-blocks.js';
-import type { MigrationPlan, NoteRecord, ReportEntry, VaultInventory } from './types.js';
+import type { DeferredLink, MigrationPlan, NoteRecord, NoteStatus, ReportEntry, VaultInventory } from './types.js';
 
 export interface MigratorOptions {
   vaultPath: string;
@@ -441,6 +441,92 @@ async function runPass1(
   void vaultPath;
 }
 
+function isPageReady(status: NoteStatus): boolean {
+  return status === 'created' || status === 'linked' || status === 'attached' || status === 'done';
+}
+
+/**
+ * 以前の実行で「リンク先のページが未作成」のため元表記（`[[X]]`）のまま残したリンクを、リンク先の
+ * ページができた後に書き換える（#139）。update_content は `[[X]]` のような文字列を一致させられない
+ * （実ワークスペースで確認）ため、ページのブロックを取得し、その文字列を含む text run を分割して
+ * リンク付きの run に置き換える。複数の run にまたがる（一部だけ太字等）場合は書き換えられないので残す。
+ */
+async function resolveDeferredLinks(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
+  const { inventory, state, api, dryRun } = opts;
+  if (dryRun) return;
+  for (const note of inventory.notes) {
+    throwIfCancelled(opts.signal);
+    const noteState = state.getNote(note.path);
+    const deferred = noteState?.deferredLinks;
+    if (!noteState?.pageId || !deferred || deferred.length === 0) continue;
+    const ready = deferred.filter((d) => {
+      const t = state.getNote(d.targetPath);
+      return Boolean(t?.pageUrl && isPageReady(t.status));
+    });
+    if (ready.length === 0) continue;
+
+    const wanted = new Set(ready.map((d) => d.text));
+    let blocks: NotionBlock[];
+    try {
+      blocks = await collectTextBlocks(api, noteState.pageId, wanted);
+    } catch (err) {
+      report.push({ category: 'warning', path: note.path, message: `保留リンクの書き換え用にブロックを取得できませんでした: ${String(err)}` });
+      continue;
+    }
+    const done = new Set<DeferredLink>();
+    for (const block of blocks) {
+      const payload = block[block.type] as { rich_text?: RichTextRun[] } | undefined;
+      let runs = payload?.rich_text;
+      if (!Array.isArray(runs)) continue;
+      let changed = false;
+      for (const d of ready) {
+        const url = state.getNote(d.targetPath)!.pageUrl!;
+        const next: RichTextRun[] = [];
+        for (const r of runs) {
+          const content = r.text?.content;
+          if (r.type === 'text' && content?.includes(d.text) && !r.text?.link) {
+            const pieces = content.split(d.text);
+            pieces.forEach((piece, i) => {
+              if (piece) next.push({ ...r, text: { ...r.text!, content: piece }, plain_text: piece });
+              if (i < pieces.length - 1) next.push({ ...r, text: { content: d.displayText, link: { url } }, plain_text: d.displayText, href: url });
+            });
+            changed = true;
+            done.add(d);
+          } else {
+            next.push(r);
+          }
+        }
+        runs = next;
+      }
+      if (changed) {
+        const clean = runs.map(({ plain_text: _p, href: _h, ...rest }) => rest);
+        await api.updateBlock(block.id, { [block.type]: { rich_text: clean } });
+      }
+    }
+    for (const d of ready.filter((x) => !done.has(x))) {
+      report.push({ category: 'warning', path: note.path, message: `保留していたリンク "${d.text}" を本文中で見つけられず書き換えられませんでした（書式が一部だけ変わっている等）` });
+    }
+    // 書き換えた・見つからなかったものは保留を解除し、リンク先がまだ未作成のものだけ次回に残す
+    const stillWaiting = deferred.filter((d) => !ready.includes(d));
+    await state.setNote(note.path, { ...state.getNote(note.path)!, deferredLinks: stillWaiting.length > 0 ? stillWaiting : undefined });
+  }
+}
+
+/** 指定の文字列のいずれかを含むブロックを（ネストも含めて）集める */
+async function collectTextBlocks(api: NotionApi, pageId: string, wanted: Set<string>, maxDepth = 3): Promise<NotionBlock[]> {
+  const out: NotionBlock[] = [];
+  async function walk(blockId: string, depth: number): Promise<void> {
+    if (depth > maxDepth) return;
+    for (const block of await api.listAllBlockChildren(blockId)) {
+      const json = JSON.stringify(block);
+      if ([...wanted].some((w) => json.includes(JSON.stringify(w).slice(1, -1)))) out.push(block);
+      if (block.has_children && block.type !== 'child_page' && block.type !== 'child_database') await walk(block.id, depth + 1);
+    }
+  }
+  await walk(pageId, 1);
+  return out;
+}
+
 async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
   const { plan, inventory, state, api, dryRun } = opts;
 
@@ -452,14 +538,21 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
     const reconverted = convertCached(inventory, note, plan.embedMode);
 
     const updates: UpdateContentItem[] = [];
+    const deferred: DeferredLink[] = [];
     for (const link of reconverted.pendingLinks) {
       const targetState = link.targetPath ? state.getNote(link.targetPath) : undefined;
       let newStr: string;
-      if (targetState?.pageUrl && (targetState.status === 'created' || targetState.status === 'linked' || targetState.status === 'attached' || targetState.status === 'done')) {
+      if (targetState?.pageUrl && isPageReady(targetState.status)) {
         newStr = `[${link.displayText}](${targetState.pageUrl})`;
       } else {
         newStr = link.fallbackText;
-        report.push({ category: 'unresolved_link', path: note.path, message: `リンク "${link.fallbackText}" は解決できず元表記に戻しました` });
+        if (link.targetPath && targetState?.status !== 'skipped') {
+          // リンク先は vault にあるがページ作成に失敗している（#139）。resume でリンク先が成功したら書き換える
+          deferred.push({ targetPath: link.targetPath, text: link.fallbackText, displayText: link.displayText });
+          report.push({ category: 'unresolved_link', path: note.path, message: `リンク先 "${link.targetPath}" のページが未作成のため "${link.fallbackText}" のまま残しました（resume でリンク先が作成されると自動でリンクになります）` });
+        } else {
+          report.push({ category: 'unresolved_link', path: note.path, message: `リンク "${link.fallbackText}" は解決できず元表記に戻しました` });
+        }
       }
       updates.push({ old_str: link.placeholder, new_str: newStr, replace_all_matches: true });
     }
@@ -471,7 +564,7 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       if (updates.length > 0) {
         await api.updatePageMarkdown(noteState.pageId, { type: 'update_content', update_content: { content_updates: updates } });
       }
-      await state.setNote(note.path, { ...noteState, status: 'linked' });
+      await state.setNote(note.path, { ...noteState, status: 'linked', ...(deferred.length > 0 ? { deferredLinks: deferred } : { deferredLinks: undefined }) });
     } catch (err) {
       // ページ自体は作成済みのため status は 'created' のまま保つ（'failed' にすると
       // resumeでPass1が再度ページを作成してしまい重複が発生する）。次回resume時に
@@ -871,6 +964,7 @@ export async function runMigration(opts: MigratorOptions): Promise<ReportEntry[]
     const containers = await createFolderContainers(opts, report);
     await runPass1(opts, containers, report);
     await runPass2(opts, report);
+    await resolveDeferredLinks(opts, report);
     await runPass3(opts, report);
   } catch (err) {
     if (!(err instanceof NotionBlockLimitError) && !(err instanceof MigrationCancelledError)) throw err;
