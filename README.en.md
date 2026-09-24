@@ -173,6 +173,7 @@ Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop /
 | frontmatter | page_tree: leading metadata callout / database: properties (title, rich_text, number, checkbox, date, multi_select, url) |
 | `icon` `cover` `banner` | Page icon (emoji, URL, vault image) and cover (URL, vault image) |
 | `tags` (list or `a, b`) | multi_select |
+| Dataview `key:: value` `[key:: value]` | Database properties in database mode (frontmatter wins; disable with `plan --no-inline-fields`) |
 | `> [!type]` callouts | All 13 types and aliases mapped to color/icon. `[!type]-` becomes a toggle. Code blocks and nesting are kept |
 | `==text==` `==🔴text==` | Highlight (colored highlights keep their color) |
 | `- [ ]` `- [x]` | To-do. `[/]` `[-]` etc. are normalized to unchecked with the original marker kept in the text |

@@ -15,3 +15,4 @@ export * from './schemas.js';
 export * from './local-state-io.js';
 export * from './verify.js';
 export * from './attachments.js';
+export * from './inline-fields.js';

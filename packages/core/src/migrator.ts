@@ -7,6 +7,7 @@ import type { StateStore } from './state.js';
 import { contentHash, isNoteUpToDate, stableStringify } from './state.js';
 import { createDatabaseForFolder, buildRowProperties } from './notion-db.js';
 import { mimeTypeFor } from './attachments.js';
+import { noteFields } from './planner.js';
 import {
   buildTitleProperty,
   buildFrontmatterMetaCallout,
@@ -439,14 +440,15 @@ async function runPass1(
     let parent: { page_id: string } | { type: 'data_source_id'; data_source_id: string };
 
     if (container.kind === 'database' && container.dataSourceId) {
-      const row = buildRowProperties(note.frontmatter, plan.frontmatterMappings[folder] ?? [], title);
+      const fields = noteFields(note, plan.inlineFields !== false);
+      const row = buildRowProperties(fields, plan.frontmatterMappings[folder] ?? [], title);
       properties = row.properties;
       // 上限で切り詰め・省略した値は、page_treeモードと同じメタcalloutで本文冒頭に全文を退避する
       // （該当キーのみ。正常に入ったプロパティまで重複させない）
       if (row.issues.length > 0) {
         const retained: Record<string, unknown> = {};
         for (const issue of row.issues) {
-          retained[issue.key] = note.frontmatter[issue.key];
+          retained[issue.key] = fields[issue.key];
           report.push({ category: 'downgraded', path: note.path, message: `プロパティ "${issue.key}": ${issue.message}` });
         }
         markdown = buildFrontmatterMetaCallout(retained) + converted.markdown;

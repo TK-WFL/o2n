@@ -50,6 +50,8 @@ export interface NoteRecord {
    * 置き換えている。Pass1 でレポートするための印（#78）。
    */
   excalidraw?: { exportedImage: string };
+  /** Dataview のインラインフィールド（`key:: value`、#146）。データベースモードでプロパティにする */
+  inlineFields?: Record<string, unknown>;
 }
 
 export interface SkippedFile {
@@ -113,6 +115,11 @@ export interface MigrationPlan {
    * 'link' は従来の URL リンク。表示名を指定したリンク（`[[ノート|表示名]]`）は常に URL リンク
    */
   linkStyle?: 'mention' | 'link';
+  /**
+   * データベースモードで Dataview のインラインフィールド（`key:: value`）もプロパティにするか（#146）。
+   * 省略時は true。frontmatter に同じキーがあれば frontmatter を優先する
+   */
+  inlineFields?: boolean;
 }
 
 export type NoteStatus =

@@ -26,6 +26,8 @@ export interface PlanCommandOptions {
   embedMode?: 'link' | 'inline';
   /** ノート間リンクの形式（#142） */
   linkStyle?: 'mention' | 'link';
+  /** Dataview のインラインフィールドをプロパティにするか（#146、既定 true） */
+  inlineFields?: boolean;
 }
 
 export async function planCommand(vaultPath: string, opts: PlanCommandOptions): Promise<string> {
@@ -44,7 +46,7 @@ export async function planCommand(vaultPath: string, opts: PlanCommandOptions): 
   const parentPageId =
     opts.parent ?? (await input({ message: '移行先のNotion親ページIDを入力してください:' }));
 
-  const suggested = suggestFolderModes(inventory, { parentPageId });
+  const suggested = suggestFolderModes(inventory, { parentPageId, inlineFields: opts.inlineFields });
   const finalFolders: FolderPlan[] = [];
 
   for (const folder of suggested) {
@@ -59,7 +61,7 @@ export async function planCommand(vaultPath: string, opts: PlanCommandOptions): 
     }
   }
 
-  const plan = buildPlan(inventory, { parentPageId, embedMode: opts.embedMode, linkStyle: opts.linkStyle });
+  const plan = buildPlan(inventory, { parentPageId, embedMode: opts.embedMode, linkStyle: opts.linkStyle, inlineFields: opts.inlineFields });
   plan.folders = finalFolders;
   // page_treeへ変更されたフォルダのfrontmatterMappingsは不要なので除去
   for (const folder of finalFolders) {
