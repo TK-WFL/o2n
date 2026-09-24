@@ -114,6 +114,13 @@ export type NoteStatus =
   | 'failed'
   | 'skipped';
 
+export interface DeferredLink {
+  targetPath: string;
+  /** Notion 上に残っている元の表記（ブロック内でこの文字列を探して置き換える） */
+  text: string;
+  displayText: string;
+}
+
 export interface NoteState {
   status: NoteStatus;
   pageId?: string;
@@ -128,6 +135,11 @@ export interface NoteState {
    * Pass3が再度探しに行き、見つからないことを誤って警告していた）。
    */
   attachedPlaceholders?: string[];
+  /**
+   * リンク先ノートが vault にあるのにページ作成に失敗していたため、元の表記（`[[X]]`）のまま残したリンク（#139）。
+   * 後の実行でリンク先のページができたら、ブロック単位でリンクに書き換える
+   */
+  deferredLinks?: DeferredLink[];
 }
 
 export type FileStatus = 'pending' | 'uploaded' | 'attached' | 'failed' | 'skipped';
