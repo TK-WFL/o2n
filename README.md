@@ -174,6 +174,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 | frontmatter | page_tree: 冒頭のメタ callout / database: プロパティ（title・rich_text・number・checkbox・date・multi_select・url） |
 | `icon` `cover` `banner` | ページのアイコン（絵文字・URL・vault 内画像）・カバー（URL・vault 内画像） |
 | `tags`（配列 / `a, b`） | multi_select |
+| Dataview の `key:: value` `[key:: value]` | database モードではプロパティにする（frontmatter が優先。`plan --no-inline-fields` で無効） |
 | `> [!type]` callout | 全 13 種別＋別名を色・アイコンに対応。`[!type]-` はトグル。コードブロックやネストも保持 |
 | `==text==` `==🔴text==` | ハイライト（色付きは色を反映） |
 | `- [ ]` `- [x]` | To-do。`[/]` `[-]` 等は未完了に正規化し元記号を本文に残す |

@@ -58,7 +58,8 @@ program
   .option('--yes', 'DB化提案をすべて自動承認する')
   .option('--embed-mode <mode>', 'ノート埋め込み ![[Note]] の扱い: link（既定、リンクに降格）| inline（本文をその場に展開）')
   .option('--link-style <style>', 'ノート間リンクの形式: mention（既定、Notion のバックリンクに現れる）| link（URL リンク）')
-  .action(async (vaultPath: string, opts: { out?: string; parent?: string; yes?: boolean; embedMode?: string; linkStyle?: string }) => {
+  .option('--no-inline-fields', 'データベースモードで Dataview のインラインフィールド（key:: value）をプロパティにしない')
+  .action(async (vaultPath: string, opts: { out?: string; parent?: string; yes?: boolean; embedMode?: string; linkStyle?: string; inlineFields?: boolean }) => {
     if (opts.embedMode !== undefined && opts.embedMode !== 'link' && opts.embedMode !== 'inline') {
       console.error(`--embed-mode は link または inline を指定してください（指定値: ${opts.embedMode}）`);
       process.exitCode = 2;

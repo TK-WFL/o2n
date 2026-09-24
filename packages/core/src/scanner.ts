@@ -3,6 +3,7 @@ import path from 'node:path';
 import matter from '@11ty/gray-matter';
 import { extensionOf, isFileExtension, MEDIA_EXTENSIONS } from './attachments.js';
 import { MD_IMAGE_RE, MD_LINK_RE } from './converter.js';
+import { parseInlineFields } from './inline-fields.js';
 import type {
   AttachmentRef,
   NoteRecord,
@@ -266,6 +267,12 @@ export function resolveByFilename(
   };
 }
 
+function inlineFieldsOf(content: string): { inlineFields?: Record<string, unknown> } {
+  if (!content.includes('::')) return {};
+  const fields = parseInlineFields(content);
+  return Object.keys(fields).length > 0 ? { inlineFields: fields } : {};
+}
+
 /** Markdown 形式の画像・リンクのうち、ローカルのファイルを指すもの: [生表記, 画像か, リンク先] */
 function markdownFileRefs(content: string): Array<[string, boolean, string]> {
   const out: Array<[string, boolean, string]> = [];
@@ -358,6 +365,7 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
       content,
       sizeBytes: stat.size,
       ...(excalidraw ? { excalidraw } : {}),
+      ...inlineFieldsOf(content),
     });
 
     for (const key of Object.keys(frontmatter)) {

@@ -1,4 +1,4 @@
-import type { FolderPlan, MigrationPlan, VaultInventory } from './types.js';
+import type { FolderPlan, MigrationPlan, NoteRecord, VaultInventory } from './types.js';
 import { buildFrontmatterMappingsForFolder } from './property-mapping.js';
 
 export interface PlannerOptions {
@@ -12,6 +12,16 @@ export interface PlannerOptions {
   embedMode?: 'link' | 'inline';
   /** ノート間リンクの形式（#142）。省略時は plan に書かず mention 相当 */
   linkStyle?: 'mention' | 'link';
+  /** Dataview のインラインフィールドもデータベースのプロパティ候補にするか（#146）。省略時は true */
+  inlineFields?: boolean;
+}
+
+/**
+ * データベースの行プロパティの元になる値。Dataview のインラインフィールド（#146）と frontmatter を
+ * 合わせたもので、同じキーは frontmatter を優先する
+ */
+export function noteFields(note: Pick<NoteRecord, 'frontmatter' | 'inlineFields'>, useInline = true): Record<string, unknown> {
+  return useInline && note.inlineFields ? { ...note.inlineFields, ...note.frontmatter } : note.frontmatter;
 }
 
 /**
@@ -33,7 +43,7 @@ export function suggestFolderModes(inventory: VaultInventory, opts: PlannerOptio
     for (const p of notePaths) {
       const note = notesByPath.get(p);
       if (!note) continue;
-      for (const key of Object.keys(note.frontmatter)) {
+      for (const key of Object.keys(noteFields(note, opts.inlineFields !== false))) {
         keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
       }
     }
@@ -61,7 +71,10 @@ export function buildPlan(inventory: VaultInventory, opts: PlannerOptions): Migr
   for (const folder of folders) {
     if (folder.mode !== 'database') continue;
     const notePaths = inventory.folderTree[folder.folderPath] ?? [];
-    const fms = notePaths.map((p) => notesByPath.get(p)?.frontmatter ?? {});
+    const fms = notePaths.map((p) => {
+      const note = notesByPath.get(p);
+      return note ? noteFields(note, opts.inlineFields !== false) : {};
+    });
     frontmatterMappings[folder.folderPath] = buildFrontmatterMappingsForFolder(fms);
   }
 
@@ -74,6 +87,7 @@ export function buildPlan(inventory: VaultInventory, opts: PlannerOptions): Migr
     skipList: opts.skipList ?? inventory.skipped.map((s) => s.path),
     ...(opts.embedMode ? { embedMode: opts.embedMode } : {}),
     ...(opts.linkStyle ? { linkStyle: opts.linkStyle } : {}),
+    ...(opts.inlineFields === false ? { inlineFields: false } : {}),
   };
 }
 

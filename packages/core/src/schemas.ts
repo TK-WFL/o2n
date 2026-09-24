@@ -21,6 +21,7 @@ export const migrationPlanSchema = z.object({
   skipList: z.array(z.string()),
   embedMode: z.enum(['link', 'inline']).optional(),
   linkStyle: z.enum(['mention', 'link']).optional(),
+  inlineFields: z.boolean().optional(),
 }) satisfies z.ZodType<MigrationPlan>;
 
 const noteStateSchema = z.object({
