@@ -140,3 +140,17 @@ describe('tags の文字列（#114）', () => {
     expect(properties.tags).toEqual({ multi_select: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] });
   });
 });
+
+describe('pageTitle（#140）', () => {
+  it('数値・真偽値・日付・配列を文字列化し、空なら fallback、2000 字で切り詰める', async () => {
+    const { pageTitle } = await import('../migrator.js');
+    expect(pageTitle(1984, 'f')).toBe('1984');
+    expect(pageTitle(true, 'f')).toBe('true');
+    expect(pageTitle(new Date('2026-01-02T00:00:00Z'), 'f')).toBe('2026-01-02');
+    expect(pageTitle(['a', 1], 'f')).toBe('a, 1');
+    expect(pageTitle('  ', 'f')).toBe('f');
+    expect(pageTitle(undefined, 'f')).toBe('f');
+    expect(pageTitle({ x: 1 }, 'f')).toBe('f');
+    expect(pageTitle('あ'.repeat(2500), 'f')).toHaveLength(2000);
+  });
+});

@@ -50,6 +50,21 @@ function basenameNoExt(p: string): string {
   return path.posix.basename(p).replace(/\.md$/, '');
 }
 
+/**
+ * frontmatter の title をページタイトルの文字列にする（#140）。以前は型アサーションだけで、
+ * `title: 1984` のような数値や配列がそのまま送られ validation_error、2000 字超も切り詰めていなかった
+ */
+export function pageTitle(raw: unknown, fallback: string): string {
+  let t: string;
+  if (typeof raw === 'string') t = raw;
+  else if (typeof raw === 'number' || typeof raw === 'boolean') t = String(raw);
+  else if (raw instanceof Date) t = raw.toISOString().slice(0, 10);
+  else if (Array.isArray(raw)) t = raw.map((v) => String(v)).join(', ');
+  else t = '';
+  t = t.trim() || fallback;
+  return Array.from(t).slice(0, 2000).join('');
+}
+
 function folderDepth(folderPath: string): number {
   return folderPath === '' ? 0 : folderPath.split('/').length;
 }
@@ -309,7 +324,7 @@ async function runPass1(
       });
     }
 
-    const title = (note.frontmatter.title as string | undefined) || basenameNoExt(note.path);
+    const title = pageTitle(note.frontmatter.title, basenameNoExt(note.path));
 
     let markdown: string;
     let properties: Record<string, unknown>;
