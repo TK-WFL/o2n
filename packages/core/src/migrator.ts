@@ -4,7 +4,7 @@ import { buildAliasIndex, buildNameIndex, resolveByFilename, resolveNoteLink } f
 import { convertNote, ESCAPE_SENTINEL, ESCAPE_TARGET, type ConverterContext, type EmbedMode } from './converter.js';
 import { NotionApiError, NotionBlockLimitError, type NotionApi, type NotionBlock, type PageCover, type PageIcon, type UpdateContentItem } from './notion-client.js';
 import type { StateStore } from './state.js';
-import { contentHash, isNoteUpToDate } from './state.js';
+import { contentHash, isNoteUpToDate, stableStringify } from './state.js';
 import { createDatabaseForFolder, buildRowProperties } from './notion-db.js';
 import {
   buildTitleProperty,
@@ -131,6 +131,36 @@ function buildResolvers(inventory: VaultInventory, sourcePath: string, embedMode
 }
 
 /**
+ * ノートの変更判定に使う指紋（#136）。以前は本文だけのハッシュだったため、frontmatter だけの変更
+ * （DB のプロパティ、icon/cover、メタ callout）や、inline 埋め込み先ノートの変更が resume で
+ * 反映されなかった。frontmatter・本文・（inline 時）埋め込み先ノート（深さ 2 まで）を含める。
+ */
+export function noteFingerprint(inventory: VaultInventory, note: NoteRecord, embedMode: EmbedMode | undefined): string {
+  const parts = [stableStringify(note.frontmatter), note.content];
+  if (embedMode === 'inline') {
+    const { noteIndex, aliasIndex } = indexesFor(inventory);
+    const byPath = new Map(inventory.notes.map((n) => [n.path, n]));
+    const seen = new Set<string>([note.path]);
+    let frontier = [note.path];
+    for (let depth = 0; depth < 2 && frontier.length > 0; depth += 1) {
+      const next: string[] = [];
+      for (const src of frontier) {
+        for (const link of inventory.wikiLinks) {
+          if (link.sourcePath !== src || !link.isEmbed) continue;
+          const target = resolveNoteLink(link.target, src, noteIndex, aliasIndex).resolved;
+          if (!target || seen.has(target)) continue;
+          seen.add(target);
+          next.push(target);
+        }
+      }
+      frontier = next;
+    }
+    for (const p of [...seen].filter((p) => p !== note.path).sort()) parts.push(p, byPath.get(p)?.content ?? '');
+  }
+  return contentHash(parts.join('\u0000'));
+}
+
+/**
  * フォルダ=親ページ(page_tree) or DB(database) のコンテナを、親→子の順で作成する。
  */
 async function createFolderContainers(
@@ -249,9 +279,18 @@ async function runPass1(
       onProgress?.(done, total, note.path);
       continue;
     }
-    const hash = contentHash(note.content);
+    const hash = noteFingerprint(inventory, note, plan.embedMode);
     const existing = state.getNote(note.path);
     if (isNoteUpToDate(existing, hash) && existing) {
+      done += 1;
+      onProgress?.(done, total, note.path);
+      continue;
+    }
+    // v0.4.0 以前の state（本文だけのハッシュ）と一致する場合は、前回から本文は変わっていない。
+    // frontmatter の変更有無は判別できないが、アップグレード直後に全ページを書き直さないよう
+    // 変更なしとみなし、ハッシュだけ新形式に更新する（以降は frontmatter の変更も検知される）
+    if (existing && isNoteUpToDate(existing, contentHash(note.content))) {
+      await state.setNote(note.path, { ...existing, contentHash: hash });
       done += 1;
       onProgress?.(done, total, note.path);
       continue;

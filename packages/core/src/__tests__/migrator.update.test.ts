@@ -75,3 +75,53 @@ describe('frontmatter の icon / cover（#113）', () => {
     expect(created('D3')).toContain('icon: LiCoffee');
   });
 });
+
+describe('変更判定の指紋（#136）', () => {
+  it('frontmatter だけを変えたノートも resume で同じページが更新される', async () => {
+    await fs.writeFile(path.join(tmpDir, 'F.md'), '---\nstatus: todo\n---\n# F\n');
+    const mock = createMockServer();
+    const first = await setupMigration(tmpDir, mock.fetchImpl);
+    await runMigration({ vaultPath: tmpDir, plan: first.plan, inventory: first.inventory, api: first.api, state: first.state, dryRun: false });
+    const pageId = first.state.getNote('F.md')!.pageId!;
+
+    await fs.writeFile(path.join(tmpDir, 'F.md'), '---\nstatus: done\n---\n# F\n');
+    const second = await setupMigration(tmpDir, mock.fetchImpl);
+    await runMigration({ vaultPath: tmpDir, plan: second.plan, inventory: second.inventory, api: second.api, state: second.state, dryRun: false });
+    const replace = mock.calls.find((c) => c.method === 'PATCH' && c.path === `/pages/${pageId}/markdown` && (c.body as { type?: string }).type === 'replace_content');
+    expect(JSON.stringify(replace?.body)).toContain('status: done');
+  });
+
+  it('本文だけのハッシュ（v0.4.0 以前）の state は変更なしとみなし、ハッシュだけ新形式に更新する', async () => {
+    const mock = createMockServer();
+    const first = await setupMigration(tmpDir, mock.fetchImpl);
+    await runMigration({ vaultPath: tmpDir, plan: first.plan, inventory: first.inventory, api: first.api, state: first.state, dryRun: false });
+    const { contentHash } = await import('../state.js');
+    const a = first.state.getNote('A.md')!;
+    const body = first.inventory.notes.find((n) => n.path === 'A.md')!.content;
+    await first.state.setNote('A.md', { ...a, contentHash: contentHash(body) });
+    await first.state.flush();
+    const patchesBefore = mock.calls.filter((c) => c.method === 'PATCH').length;
+
+    const second = await setupMigration(tmpDir, mock.fetchImpl);
+    await runMigration({ vaultPath: tmpDir, plan: second.plan, inventory: second.inventory, api: second.api, state: second.state, dryRun: false });
+    expect(mock.calls.filter((c) => c.method === 'PATCH').length).toBe(patchesBefore);
+    expect(second.state.getNote('A.md')!.contentHash).not.toBe(contentHash(body));
+    expect(mock.calls.filter((c) => c.method === 'POST' && c.path === '/pages')).toHaveLength(2);
+  });
+
+  it('inline 埋め込み先ノートの変更でホストページも更新される', async () => {
+    await fs.writeFile(path.join(tmpDir, 'Host.md'), '# Host\n\n![[B]]\n');
+    const mock = createMockServer();
+    const first = await setupMigration(tmpDir, mock.fetchImpl);
+    first.plan.embedMode = 'inline';
+    await runMigration({ vaultPath: tmpDir, plan: first.plan, inventory: first.inventory, api: first.api, state: first.state, dryRun: false });
+    const hostId = first.state.getNote('Host.md')!.pageId!;
+
+    await fs.writeFile(path.join(tmpDir, 'B.md'), '# B\n\n埋め込み先を編集\n');
+    const second = await setupMigration(tmpDir, mock.fetchImpl);
+    second.plan.embedMode = 'inline';
+    await runMigration({ vaultPath: tmpDir, plan: second.plan, inventory: second.inventory, api: second.api, state: second.state, dryRun: false });
+    const replace = mock.calls.find((c) => c.method === 'PATCH' && c.path === `/pages/${hostId}/markdown` && (c.body as { type?: string }).type === 'replace_content');
+    expect(JSON.stringify(replace?.body)).toContain('埋め込み先を編集');
+  });
+});
