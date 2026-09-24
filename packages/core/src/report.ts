@@ -19,6 +19,7 @@ const CATEGORY_LABEL: Record<ReportEntry['category'], string> = {
   downgraded: '降格変換',
   warning: '警告',
   aborted: '中断',
+  moved: '移動・改名',
 };
 
 export function buildReport(state: StateFile, entries: ReportEntry[], run?: MigrationRunMeta): MigrationReport {

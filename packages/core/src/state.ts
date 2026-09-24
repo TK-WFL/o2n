@@ -154,6 +154,12 @@ export class StateStore {
     return this.persist();
   }
 
+  /** ノートの記録を削除する（移動・改名で新しいパスへ引き継いだ旧パス、#147） */
+  deleteNote(notePath: string): Promise<void> {
+    delete this.data.notes[notePath];
+    return this.persist();
+  }
+
   getFile(filePath: string): FileState | undefined {
     return this.data.files[filePath];
   }

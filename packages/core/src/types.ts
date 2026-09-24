@@ -197,7 +197,9 @@ export interface ReportEntry {
     | 'downgraded'
     | 'warning'
     /** 移行全体を途中で中断した（例: Notion Free プランのブロック上限）。path は中断時点のノート */
-    | 'aborted';
+    | 'aborted'
+    /** ノートの移動・改名を検知し、Notion 上の同じページを移動・改名した（#147） */
+    | 'moved';
   path: string;
   message: string;
 }

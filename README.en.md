@@ -81,6 +81,7 @@ If it stops halfway, `npx @tk_wfl/o2n-cli resume <vaultPath>` continues where it
 | `verify <vault>` | Reconcile state with the vault; `--deep` also checks the real Notion pages | `--deep` `--json` |
 | `report <vault>` | Show the latest report (`.o2n/report.md`) | |
 
+- If you move or rename notes after migrating, `resume` detects it and moves/renames the same Notion page (if the content changed too, a new page is created)
 - `migrate --dry-run` writes its report to `.o2n/report.dry-run.md` and never overwrites the real `report.md`
 - `--embed-mode inline`: expand `![[note]]` embeds in place instead of linking (`![[note#heading]]` expands only that section)
 - Exit codes: `0` all succeeded / `1` some failed or mismatched / `2` fatal error
