@@ -24,7 +24,7 @@ import {
   type StateFile,
   blockLimitWarning,
   estimateBlockCount,
-  wasAbortedByBlockLimit,
+  wasAborted,
   rateLimitFromEnv,
   deepVerifyNotes,
   summarizeState,
@@ -270,7 +270,7 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
         });
         const report = buildReport(state.snapshot, entries, { startedAt, finishedAt: Date.now(), apiCalls: api.callCount, dryRun, before });
         await writeReport(resolved, report, state.snapshot);
-        if (wasAbortedByBlockLimit(entries)) {
+        if (wasAborted(entries)) {
           setJob(resolved, {
             status: controller.signal.aborted ? 'cancelled' : 'error',
             done: getJob(resolved)?.done ?? 0,
