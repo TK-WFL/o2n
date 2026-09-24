@@ -57,14 +57,20 @@ program
   .option('--parent <pageId>', '移行先のNotion親ページID')
   .option('--yes', 'DB化提案をすべて自動承認する')
   .option('--embed-mode <mode>', 'ノート埋め込み ![[Note]] の扱い: link（既定、リンクに降格）| inline（本文をその場に展開）')
-  .action(async (vaultPath: string, opts: { out?: string; parent?: string; yes?: boolean; embedMode?: string }) => {
+  .option('--link-style <style>', 'ノート間リンクの形式: mention（既定、Notion のバックリンクに現れる）| link（URL リンク）')
+  .action(async (vaultPath: string, opts: { out?: string; parent?: string; yes?: boolean; embedMode?: string; linkStyle?: string }) => {
     if (opts.embedMode !== undefined && opts.embedMode !== 'link' && opts.embedMode !== 'inline') {
       console.error(`--embed-mode は link または inline を指定してください（指定値: ${opts.embedMode}）`);
       process.exitCode = 2;
       return;
     }
+    if (opts.linkStyle !== undefined && opts.linkStyle !== 'mention' && opts.linkStyle !== 'link') {
+      console.error(`--link-style は mention または link を指定してください（指定値: ${opts.linkStyle}）`);
+      process.exitCode = 2;
+      return;
+    }
     try {
-      await planCommand(vaultPath, { ...opts, embedMode: opts.embedMode as 'link' | 'inline' | undefined });
+      await planCommand(vaultPath, { ...opts, embedMode: opts.embedMode as 'link' | 'inline' | undefined, linkStyle: opts.linkStyle as 'mention' | 'link' | undefined });
     } catch (err) {
       if (err instanceof PlanInputRequiredError) {
         console.error(err.message);

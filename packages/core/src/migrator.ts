@@ -527,8 +527,54 @@ async function collectTextBlocks(api: NotionApi, pageId: string, wanted: Set<str
   return out;
 }
 
+/**
+ * リンクの表示テキストがリンク先ノートの名前（ファイル名 or タイトル）そのものか。メンションはリンク先の
+ * タイトルを表示するため、aliases 経由の `[[別名]]` などをメンションにすると書いた文字と違う表示になる
+ */
+function showsTargetName(inventory: VaultInventory, targetPath: string, displayText: string): boolean {
+  const norm = (s: string) => s.normalize('NFKC').trim().toLowerCase();
+  const shown = norm(path.posix.basename(displayText).replace(/\.md$/i, ''));
+  const target = inventory.notes.find((n) => n.path === targetPath);
+  return shown === norm(basenameNoExt(targetPath)) || (target !== undefined && shown === norm(pageTitle(target.frontmatter.title, '')));
+}
+
+/** 見出しの比較用の正規化（Obsidian はリンク中の `#^|:%[]` 等を空白に置き換えるため、両側を揃える） */
+export function normalizeHeading(s: string): string {
+  return s.normalize('NFKC').toLowerCase().replace(/[#^|:%[\]\\*_`~]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+const HEADING_TYPES = new Set(['heading_1', 'heading_2', 'heading_3', 'heading_4']);
+
+/** ページの見出しブロック（トグル見出し・列の中も含め深さ 2 まで）を 正規化テキスト → ブロックID で返す */
+async function headingIndex(api: NotionApi, pageId: string): Promise<Map<string, string>> {
+  const index = new Map<string, string>();
+  async function walk(blockId: string, depth: number): Promise<void> {
+    for (const block of await api.listAllBlockChildren(blockId)) {
+      if (HEADING_TYPES.has(block.type)) {
+        const runs = (block[block.type] as { rich_text?: Array<{ plain_text?: string; text?: { content?: string } }> } | undefined)?.rich_text ?? [];
+        const key = normalizeHeading(runs.map((r) => r.plain_text ?? r.text?.content ?? '').join(''));
+        if (key && !index.has(key)) index.set(key, block.id);
+      }
+      if (depth < 2 && block.has_children && block.type !== 'child_page' && block.type !== 'child_database') await walk(block.id, depth + 1);
+    }
+  }
+  await walk(pageId, 1);
+  return index;
+}
+
 async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
   const { plan, inventory, state, api, dryRun } = opts;
+  const linkStyle = plan.linkStyle ?? 'mention';
+  // 見出しリンクの解決用に、リンク先ページの見出し一覧をページごとに1回だけ取得する（#143）
+  const headingCache = new Map<string, Promise<Map<string, string>>>();
+  const headingsOf = (pageId: string) => {
+    let p = headingCache.get(pageId);
+    if (!p) {
+      p = headingIndex(api, pageId);
+      headingCache.set(pageId, p);
+    }
+    return p;
+  };
 
   for (const note of inventory.notes) {
     throwIfCancelled(opts.signal);
@@ -543,7 +589,29 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       const targetState = link.targetPath ? state.getNote(link.targetPath) : undefined;
       let newStr: string;
       if (targetState?.pageUrl && isPageReady(targetState.status)) {
-        newStr = `[${link.displayText}](${targetState.pageUrl})`;
+        let url = targetState.pageUrl;
+        if (link.heading) {
+          // 見出しリンク（#143）: `ページURL#ブロックID` で見出しそのものに移動できる（実ワークスペースで確認）
+          let blockId: string | undefined;
+          if (!dryRun && targetState.pageId) {
+            try {
+              blockId = (await headingsOf(targetState.pageId)).get(normalizeHeading(link.heading.split('#').pop() ?? link.heading));
+            } catch {
+              blockId = undefined;
+            }
+          }
+          if (blockId) {
+            url = `${targetState.pageUrl.split('#')[0]}#${blockId.replace(/-/g, '')}`;
+          } else if (!dryRun) {
+            report.push({ category: 'downgraded', path: note.path, message: `見出し "${link.heading}" がリンク先 "${link.targetPath}" に見つからないため、ページ先頭へのリンクにしました` });
+          }
+          newStr = `[${link.displayText}](${url})`;
+        } else if (linkStyle === 'mention' && link.mentionable && link.targetPath && showsTargetName(inventory, link.targetPath, link.displayText)) {
+          // ページメンション（#142）: URL リンクと違い Notion のバックリンクに現れ、リンク先の改名にも追従する
+          newStr = `<mention-page url="${url}"/>`;
+        } else {
+          newStr = `[${link.displayText}](${url})`;
+        }
       } else {
         newStr = link.fallbackText;
         if (link.targetPath && targetState?.status !== 'skipped') {

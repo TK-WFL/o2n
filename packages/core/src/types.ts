@@ -103,6 +103,11 @@ export interface MigrationPlan {
    * 'inline' は埋め込み先の本文をその場に展開する（Notion 上では同期されない複製になる）。
    */
   embedMode?: 'link' | 'inline';
+  /**
+   * ノート間リンクの形式（#142）。省略時は 'mention'（Notion のページメンション。バックリンクに現れる）。
+   * 'link' は従来の URL リンク。表示名を指定したリンク（`[[ノート|表示名]]`）は常に URL リンク
+   */
+  linkStyle?: 'mention' | 'link';
 }
 
 export type NoteStatus =

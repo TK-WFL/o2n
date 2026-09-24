@@ -148,6 +148,7 @@ server.tool(
         folders: z.array(folderPlanSchema).optional(),
         skipList: z.array(z.string()).optional(),
         embedMode: z.enum(['link', 'inline']).optional().describe('ノート埋め込み ![[Note]] の扱い。link=リンクに降格（既定）、inline=本文をその場に展開'),
+        linkStyle: z.enum(['mention', 'link']).optional().describe('ノート間リンクの形式。mention=ページメンション（既定、バックリンクに現れる）、link=URL リンク'),
         confirmationToken: z.string().optional(),
       })
       .describe('計画への部分更新'),
@@ -162,6 +163,7 @@ server.tool(
     if (patch.folders) plan.folders = patch.folders;
     if (patch.skipList) plan.skipList = patch.skipList;
     if (patch.embedMode) plan.embedMode = patch.embedMode;
+    if (patch.linkStyle) plan.linkStyle = patch.linkStyle;
     await savePlan(guard.vaultPath, plan);
     return text(JSON.stringify(plan, null, 2));
   },

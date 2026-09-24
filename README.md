@@ -75,7 +75,7 @@ npx @tk_wfl/o2n-cli verify  <vaultのパス> --deep      # Notion の実ペー�
 | コマンド | 役割 | 主なオプション |
 |---|---|---|
 | `scan <vault>` | vault を走査して件数・推定ブロック数を表示（Notion にはアクセスしない） | `--verbose` `--json` |
-| `plan <vault>` | 移行計画（`.o2n/plan.json`）を対話で作成 | `--parent <id>` `--yes` `--embed-mode inline` `--out <path>` |
+| `plan <vault>` | 移行計画（`.o2n/plan.json`）を対話で作成 | `--parent <id>` `--yes` `--embed-mode inline` `--link-style link` `--out <path>` |
 | `migrate <vault>` | 計画に従って移行 | `--dry-run` `--plan <path>` `--quiet` `--verbose` |
 | `resume <vault>` | 中断・失敗した移行を続きから再開（冪等） | `--quiet` |
 | `verify <vault>` | state と vault の突き合わせ。`--deep` で Notion の実ページとも照合 | `--deep` `--json` |
@@ -163,8 +163,10 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 
 | Obsidian | Notion での扱い |
 |---|---|
-| `[[ノート]]` `[[ノート\|表示名]]` | ページ間リンク。大文字小文字非依存、frontmatter `aliases` でも解決 |
-| `[[ノート#見出し]]` `[[ノート#^id]]` | ページ先頭へのリンク（Notion に見出しリンクが無いため。レポートに記録） |
+| `[[ノート]]` | **ページメンション**（Notion のバックリンクに現れ、改名にも追従）。`plan --link-style link` で URL リンク |
+| `[[ノート\|表示名]]`、`aliases` 経由の `[[別名]]` | 書いた表示名のままの URL リンク（大文字小文字非依存で解決） |
+| `[[ノート#見出し]]` `[[#見出し]]` `[x](note.md#見出し)` | **その見出しへのリンク**（見出しが無ければページ先頭にして報告） |
+| `[[ノート#^id]]` | ページ先頭へのリンク（Notion にブロック参照が無いため。レポートに記録） |
 | `![[ノート]]` `![[ノート#見出し]]` | 既定はリンク。`--embed-mode inline` で本文を展開（循環・深さ 3 以上はリンク） |
 | `![[画像.png\|300]]` `[資料](a.pdf)` | アップロードして元の位置に画像 / PDF / 音声 / 動画 / ファイルブロック |
 | `[テキスト](note.md#見出し)` | wikilink と同じ解決（`.MD` も可） |
@@ -178,7 +180,6 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 | 数式 `$…$` `$$…$$`、mermaid | そのまま保持 |
 | `%% コメント %%` `<!-- コメント -->` | 削除（コードブロックをまたぐものも） |
 | `[^1]` 脚注、`^[インライン脚注]` | 文中に展開 |
-| `[[#見出し]]`（同じノート内） | 自ページへのリンク |
 | 行末のブロック ID `^abc123` | 取り除く（Obsidian でも非表示のため） |
 | インラインコード・コードブロック | 中身は変換しない |
 | Excalidraw ノート | 同名の書き出し画像（`.png` / `.svg`）があれば画像として移行、無ければスキップ |

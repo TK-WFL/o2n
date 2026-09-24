@@ -75,7 +75,7 @@ If it stops halfway, `npx @tk_wfl/o2n-cli resume <vaultPath>` continues where it
 | Command | What it does | Main options |
 |---|---|---|
 | `scan <vault>` | Scan the vault and print counts and an estimated block count (no Notion access) | `--verbose` `--json` |
-| `plan <vault>` | Create the migration plan (`.o2n/plan.json`) interactively | `--parent <id>` `--yes` `--embed-mode inline` `--out <path>` |
+| `plan <vault>` | Create the migration plan (`.o2n/plan.json`) interactively | `--parent <id>` `--yes` `--embed-mode inline` `--link-style link` `--out <path>` |
 | `migrate <vault>` | Migrate according to the plan | `--dry-run` `--plan <path>` `--quiet` `--verbose` |
 | `resume <vault>` | Continue an interrupted or failed migration (idempotent) | `--quiet` |
 | `verify <vault>` | Reconcile state with the vault; `--deep` also checks the real Notion pages | `--deep` `--json` |
@@ -162,8 +162,10 @@ Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop /
 
 | Obsidian | In Notion |
 |---|---|
-| `[[note]]` `[[note\|text]]` | Page links. Case-insensitive; frontmatter `aliases` are resolved too |
-| `[[note#heading]]` `[[note#^id]]` | Link to the top of the page (Notion has no heading links; recorded in the report) |
+| `[[note]]` | **Page mention** (shows up in Notion backlinks, follows renames). `plan --link-style link` for URL links |
+| `[[note\|text]]`, `[[alias]]` via `aliases` | URL link keeping the text you wrote (resolved case-insensitively) |
+| `[[note#heading]]` `[[#heading]]` `[x](note.md#heading)` | **Link to that heading** (page top if the heading is missing; reported) |
+| `[[note#^id]]` | Link to the top of the page (Notion has no block references; recorded in the report) |
 | `![[note]]` `![[note#heading]]` | Link by default. `--embed-mode inline` expands the body (cycles and depth > 2 fall back to a link) |
 | `![[image.png\|300]]` `[doc](a.pdf)` | Uploaded and placed as image / PDF / audio / video / file blocks |
 | `[text](note.md#heading)` | Resolved like a wikilink (`.MD` too) |
@@ -177,7 +179,6 @@ Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop /
 | Math `$…$` `$$…$$`, mermaid | Passed through |
 | `%% comments %%` `<!-- comments -->` | Removed (even across code blocks) |
 | `[^1]` footnotes, `^[inline footnotes]` | Expanded inline |
-| `[[#heading]]` (same note) | Link to the page itself |
 | Trailing block IDs `^abc123` | Removed (hidden in Obsidian too) |
 | Inline code and code blocks | Left untouched |
 | Excalidraw notes | Migrated as the exported image (`.png` / `.svg`) when one exists, otherwise skipped |
