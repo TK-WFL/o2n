@@ -14,7 +14,7 @@ export function contentHash(content: string): string {
   return 'sha256:' + createHash('sha256').update(content, 'utf-8').digest('hex');
 }
 
-function stableStringify(value: unknown): string {
+export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v)).join(',')}]`;
   if (value && typeof value === 'object') {
     const obj = value as Record<string, unknown>;
