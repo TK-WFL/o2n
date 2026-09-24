@@ -193,7 +193,7 @@ If 60%+ of a folder's direct notes share 3 or more frontmatter keys, o2n **sugge
 ## ⏱ Time and limits
 
 - **Estimate**: 1,000 notes + 500 attachments ≈ 4,000–5,000 API calls ≈ 30–40 minutes (default 2 req/s)
-- On Business or higher, `O2N_REQUESTS_PER_SECOND=8` (1–10) shortens the run. 429 responses are honored via `Retry-After`
+- On Business or higher, `O2N_REQUESTS_PER_SECOND=8` (1–10) shortens the run; notes are processed with the same parallelism (page order is preserved). 429 responses are honored via `Retry-After`
 - **Notion Free plan block limit** (since September 2026): multi-member Free workspaces have a lifetime cap of 1,000 blocks that is also enforced by the API ([reference](https://developers.notion.com/reference/workspace-block-limits)). `scan` / `plan` warn up front using the estimated block count; if the limit is hit, o2n stops immediately and `resume` continues later. PATs, paid plans and single-member Free workspaces are not affected
 
 ---

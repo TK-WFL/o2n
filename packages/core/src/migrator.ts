@@ -34,6 +34,57 @@ export interface MigratorOptions {
    * 指定するとsendが400になるため変更しないこと。
    */
   multipartPartSizeBytes?: number;
+  /**
+   * ノートを同時に処理する数（#144）。既定 1（逐次）。CLI/MCP はレート設定（O2N_REQUESTS_PER_SECOND、
+   * 既定 2）に合わせて渡す。実際の API 呼び出し頻度は NotionClient のレート制御が上限になる。
+   * Notion は子ページを作成順に並べるため、新規ページの作成だけはノートの順序（#112）を守って直列に行う
+   */
+  concurrency?: number;
+}
+
+/**
+ * items を最大 concurrency 件ずつ並行に処理する。いずれかが例外を投げたら新しい項目の投入を止め、
+ * 処理中のものが終わるのを待ってから最初の例外を投げる（ブロック上限・中断を即座に止めるため）。
+ * onSettled は各項目の処理が（成否にかかわらず）終わったときに呼ぶ
+ */
+export async function forEachNote<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<void>,
+  onSettled?: (index: number) => void,
+): Promise<void> {
+  let next = 0;
+  let failed = false;
+  let firstError: unknown;
+  const worker = async () => {
+    while (!failed) {
+      const i = next;
+      next += 1;
+      if (i >= items.length) return;
+      try {
+        await fn(items[i]!, i);
+      } catch (err) {
+        if (!failed) {
+          failed = true;
+          firstError = err;
+        }
+      } finally {
+        onSettled?.(i);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, worker));
+  if (failed) throw firstError;
+}
+
+/** i 番目の処理を i-1 番目の「番」が終わるまで待たせる（新規ページの作成順をノート順に保つ） */
+function createTurns(count: number): { wait: (i: number) => Promise<void>; release: (i: number) => void } {
+  const resolvers: Array<() => void> = [];
+  const gates = Array.from({ length: count }, (_, i) => new Promise<void>((r) => { resolvers[i] = r; }));
+  return {
+    wait: (i) => (i === 0 ? Promise.resolve() : gates[i - 1]!),
+    release: (i) => resolvers[i]?.(),
+  };
 }
 
 interface Container {
@@ -283,24 +334,26 @@ async function runPass1(
   report: ReportEntry[],
 ): Promise<void> {
   const { plan, inventory, state, api, dryRun, vaultPath, onProgress } = opts;
+  const concurrency = opts.concurrency ?? 1;
+  const turns = createTurns(inventory.notes.length);
   const skipSet = new Set(plan.skipList);
   const total = inventory.notes.length;
   let done = 0;
 
-  for (const note of inventory.notes) {
+  await forEachNote(inventory.notes, concurrency, async (note, index) => {
     throwIfCancelled(opts.signal);
     if (skipSet.has(note.path)) {
       await state.setNote(note.path, { status: 'skipped' });
       done += 1;
       onProgress?.(done, total, note.path);
-      continue;
+      return;
     }
     const hash = noteFingerprint(inventory, note, plan.embedMode);
     const existing = state.getNote(note.path);
     if (isNoteUpToDate(existing, hash) && existing) {
       done += 1;
       onProgress?.(done, total, note.path);
-      continue;
+      return;
     }
     // v0.4.0 以前の state（本文だけのハッシュ）と一致する場合は、前回から本文は変わっていない。
     // frontmatter の変更有無は判別できないが、アップグレード直後に全ページを書き直さないよう
@@ -309,7 +362,7 @@ async function runPass1(
       await state.setNote(note.path, { ...existing, contentHash: hash });
       done += 1;
       onProgress?.(done, total, note.path);
-      continue;
+      return;
     }
 
     const folder = folderOf(note.path);
@@ -387,7 +440,7 @@ async function runPass1(
         });
         done += 1;
         onProgress?.(done, total, note.path);
-        continue;
+        return;
       }
 
       if (existing?.pageId && existing.status !== 'failed') {
@@ -406,17 +459,24 @@ async function runPass1(
           report.push({ category: 'warning', path: note.path, message: `変更されたノートのページ更新に失敗したため前回の内容のまま残しました: ${String(err)}` });
           done += 1;
           onProgress?.(done, total, note.path);
-          continue;
+          return;
         }
         // 添付・リンクは新しい本文のプレースホルダーに対して Pass2/3 で再解決する
         await state.setNote(note.path, { status: 'created', pageId: existing.pageId, pageUrl: existing.pageUrl, contentHash: hash });
         report.push({ category: 'downgraded', path: note.path, message: '前回の移行後に変更されたため、Notion 上の同じページの本文を置き換えました' });
         done += 1;
         onProgress?.(done, total, note.path);
-        continue;
+        return;
       }
 
-      const page = await api.createPageMarkdown({ parent, markdown: chunks[0], properties });
+      // 新規ページの作成だけはノート順に直列化する（Notion は作成順に子ページを並べる、#112）
+      await turns.wait(index);
+      let page: { id: string; url: string };
+      try {
+        page = await api.createPageMarkdown({ parent, markdown: chunks[0], properties });
+      } finally {
+        turns.release(index);
+      }
       // 実ワークスペース確認（2026-09-21）: POST /pages（markdown）に cover を同梱しても反映されない
       // ケースがあったため、装飾は作成後に PATCH /pages/:id で別途適用する
       if (decoration.icon || decoration.cover) await api.updatePageProperties(page.id, {}, decoration);
@@ -438,7 +498,7 @@ async function runPass1(
     }
     done += 1;
     onProgress?.(done, total, note.path);
-  }
+  }, turns.release);
   void vaultPath;
 }
 
@@ -455,16 +515,17 @@ function isPageReady(status: NoteStatus): boolean {
 async function resolveDeferredLinks(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
   const { inventory, state, api, dryRun } = opts;
   if (dryRun) return;
-  for (const note of inventory.notes) {
+  const concurrency = opts.concurrency ?? 1;
+  await forEachNote(inventory.notes, concurrency, async (note) => {
     throwIfCancelled(opts.signal);
     const noteState = state.getNote(note.path);
     const deferred = noteState?.deferredLinks;
-    if (!noteState?.pageId || !deferred || deferred.length === 0) continue;
+    if (!noteState?.pageId || !deferred || deferred.length === 0) return;
     const ready = deferred.filter((d) => {
       const t = state.getNote(d.targetPath);
       return Boolean(t?.pageUrl && isPageReady(t.status));
     });
-    if (ready.length === 0) continue;
+    if (ready.length === 0) return;
 
     const wanted = new Set(ready.map((d) => d.text));
     let blocks: NotionBlock[];
@@ -472,7 +533,7 @@ async function resolveDeferredLinks(opts: MigratorOptions, report: ReportEntry[]
       blocks = await collectTextBlocks(api, noteState.pageId, wanted);
     } catch (err) {
       report.push({ category: 'warning', path: note.path, message: `保留リンクの書き換え用にブロックを取得できませんでした: ${String(err)}` });
-      continue;
+      return;
     }
     const done = new Set<DeferredLink>();
     for (const block of blocks) {
@@ -510,7 +571,7 @@ async function resolveDeferredLinks(opts: MigratorOptions, report: ReportEntry[]
     // 書き換えた・見つからなかったものは保留を解除し、リンク先がまだ未作成のものだけ次回に残す
     const stillWaiting = deferred.filter((d) => !ready.includes(d));
     await state.setNote(note.path, { ...state.getNote(note.path)!, deferredLinks: stillWaiting.length > 0 ? stillWaiting : undefined });
-  }
+  });
 }
 
 /** 指定の文字列のいずれかを含むブロックを（ネストも含めて）集める */
@@ -565,6 +626,7 @@ async function headingIndex(api: NotionApi, pageId: string): Promise<Map<string,
 
 async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
   const { plan, inventory, state, api, dryRun } = opts;
+  const concurrency = opts.concurrency ?? 1;
   const linkStyle = plan.linkStyle ?? 'mention';
   // 見出しリンクの解決用に、リンク先ページの見出し一覧をページごとに1回だけ取得する（#143）
   const headingCache = new Map<string, Promise<Map<string, string>>>();
@@ -577,10 +639,10 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
     return p;
   };
 
-  for (const note of inventory.notes) {
+  await forEachNote(inventory.notes, concurrency, async (note) => {
     throwIfCancelled(opts.signal);
     const noteState = state.getNote(note.path);
-    if (!noteState || noteState.status !== 'created' || !noteState.pageId) continue;
+    if (!noteState || noteState.status !== 'created' || !noteState.pageId) return;
 
     const reconverted = convertCached(inventory, note, plan.embedMode);
 
@@ -642,7 +704,7 @@ async function runPass2(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       report.push({ category: 'warning', path: note.path, message: `リンク解決に失敗: ${String(err)}` });
     }
     void dryRun;
-  }
+  });
 }
 
 const SINGLE_PART_LIMIT = 20 * 1024 * 1024;
@@ -864,6 +926,9 @@ async function findPlaceholderBlocks(
 
 async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<void> {
   const { plan, inventory, state, api, dryRun, vaultPath } = opts;
+  const concurrency = opts.concurrency ?? 1;
+  // 同じ添付を複数ノートが同時にアップロードしないよう、処理中のアップロードを共有する
+  const uploadsInFlight = new Map<string, Promise<string>>();
 
   let wsLimit = Infinity;
   if (!dryRun) {
@@ -875,18 +940,18 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
     }
   }
 
-  for (const note of inventory.notes) {
+  await forEachNote(inventory.notes, concurrency, async (note) => {
     throwIfCancelled(opts.signal);
     const noteState = state.getNote(note.path);
     // 'done'も対象に含めるのは、resume時に前回失敗した添付だけを再試行できるようにするため
     // （一度'done'になったノートをPass3が二度と見に行かないと、失敗した添付が永遠に直らない）
-    if (!noteState || !noteState.pageId || (noteState.status !== 'linked' && noteState.status !== 'done')) continue;
+    if (!noteState || !noteState.pageId || (noteState.status !== 'linked' && noteState.status !== 'done')) return;
 
     const reconverted = convertCached(inventory, note, plan.embedMode);
 
     if (reconverted.pendingFiles.length === 0) {
       await state.setNote(note.path, { ...noteState, status: 'done' });
-      continue;
+      return;
     }
 
     const attachedPlaceholders = new Set(noteState.attachedPlaceholders ?? []);
@@ -905,7 +970,7 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
         placeholderBlocks = await findPlaceholderBlocks(api, noteState.pageId, lookupTargets);
       } catch (err) {
         report.push({ category: 'warning', path: note.path, message: `子ブロックの取得に失敗: ${String(err)}` });
-        continue;
+        return;
       }
     }
 
@@ -937,7 +1002,12 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
             report.push({ category: 'oversized_file', path: file.targetPath, message: 'ワークスペースのファイルサイズ上限を超過したためスキップしました' });
             continue;
           }
-          fileUploadId = await uploadFile(api, absPath, stat.size, dryRun, opts.multipartPartSizeBytes);
+          let inFlight = uploadsInFlight.get(file.targetPath);
+          if (!inFlight) {
+            inFlight = uploadFile(api, absPath, stat.size, dryRun, opts.multipartPartSizeBytes);
+            uploadsInFlight.set(file.targetPath, inFlight);
+          }
+          fileUploadId = await inFlight;
           await state.setFile(file.targetPath, { status: 'uploaded', fileUploadId });
         } catch (err) {
           await state.setFile(file.targetPath, { status: 'failed', error: String(err) });
@@ -986,7 +1056,7 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
     }
 
     await state.setNote(note.path, { ...state.getNote(note.path)!, status: 'done' });
-  }
+  });
 }
 
 export async function runMigration(opts: MigratorOptions): Promise<ReportEntry[]> {

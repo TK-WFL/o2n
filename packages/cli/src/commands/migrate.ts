@@ -17,6 +17,7 @@ import {
   type ReportEntry,
   rateLimitFromEnv,
   reportPath,
+  noteConcurrencyFromEnv,
 } from '@tk_wfl/o2n-core';
 import { getToken } from '../token.js';
 
@@ -96,6 +97,7 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
     api,
     state,
     dryRun,
+    concurrency: noteConcurrencyFromEnv(),
     onProgress: progressPrinter(opts.quiet ?? false),
   });
   if (!opts.quiet && process.stdout.isTTY) process.stdout.write('\n');
