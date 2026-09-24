@@ -1097,11 +1097,15 @@ export function wasAborted(entries: ReportEntry[]): boolean {
   return entries.some((e) => e.category === 'aborted');
 }
 
-/** 移行がブロック上限で中断されたか（CLI/MCP が終了コードやメッセージを出し分けるため） */
+/**
+ * @deprecated 利用者の中断（cancel）でも true になるため名前が実態と合わない。wasAborted を使うこと。
+ * 公開 API の後方互換のため残している
+ */
 export function wasAbortedByBlockLimit(entries: ReportEntry[]): boolean {
   return entries.some((e) => e.category === 'aborted');
 }
 
+/** @deprecated 内部では使っていない。公開 API の後方互換のため残している */
 export function noteRecordByPath(notes: NoteRecord[], p: string): NoteRecord | undefined {
   return notes.find((n) => n.path === p);
 }

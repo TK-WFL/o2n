@@ -33,3 +33,4 @@
   - 大文字小文字違いの wikilink（`CaseLink.md`）
   - 非 YAML frontmatter は skipped になり vault 全体は止まらない（`BadFrontmatter.md`）
 - `Phase4/`（v0.4.1 の検証用）: 直下にノートの無い中間フォルダ（`Deep/`）、数値の `title`、HTML コメント、山括弧パス・タイトル付き画像、インライン脚注、同じノート内リンク、ブロック ID、リスト内 callout（`Edge.md`）
+- `Phase5/`（v0.5.0 の検証用）: ページメンション・表示名付きリンク・他ノート／同じノート内の見出しリンク、Markdown 形式でだけ参照される画像と CSV 添付（`Links.md`）
