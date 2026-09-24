@@ -440,3 +440,46 @@ describe('md形式リンクの取りこぼし（#109）', () => {
     expect(r.markdown).toContain('[y](memo.txt)');
   });
 });
+
+describe('HTML コメントと取りこぼし記法（#137, #141）', () => {
+  it('<!-- --> は削除される（複数行・コードブロック/インラインコード内は対象外）', () => {
+    const r = convertNote('a<!-- x -->b\n<!--\n複数行\n-->\nc `<!-- keep -->`\n```\n<!-- code -->\n```', ctx());
+    expect(r.markdown).toBe('ab\n\nc `<!-- keep -->`\n```\n<!-- code -->\n```');
+    expect(r.entries.some((e) => e.message.includes('HTMLコメントを2件'))).toBe(true);
+    expect(convertNote('a <!-- 閉じない', ctx()).markdown).toBe('a <!-- 閉じない');
+  });
+
+  it('山括弧パスとタイトル付きの md 画像・リンクを変換する', () => {
+    expect(convertNote('![alt](<my pic.png>)', ctx()).pendingFiles).toHaveLength(1);
+    expect(convertNote('![alt](pic.png "タイトル")', ctx()).pendingFiles).toHaveLength(1);
+    const r = convertNote('[x](<Note B.md>) と [y](Note%20B.md "t")', ctx());
+    expect(r.markdown).toBe('⟦o2n-link-0⟧ と ⟦o2n-link-1⟧');
+  });
+
+  it('インライン脚注と複数行脚注を文中展開する', () => {
+    expect(convertNote('本文^[注記] 続き', ctx()).markdown).toBe('本文 (注記) 続き');
+    expect(convertNote('x[^1]\n\n[^1]: 一行目\n    二行目\n\n後', ctx()).markdown).toBe('x (一行目 二行目)\n\n後');
+  });
+
+  it('同じノート内の [[#見出し]] は自ページへのリンク、![[#…]] は文字にして報告する', () => {
+    const r = convertNote('[[#見出し]] と [[#見出し|表示]] と ![[#埋め込み]] と [[]]', { ...ctx(), sourcePath: 'Self.md' });
+    expect(r.markdown).toBe('⟦o2n-link-0⟧ と ⟦o2n-link-1⟧ と 埋め込み と [[]]');
+    expect(r.pendingLinks.map((l) => [l.targetPath, l.displayText])).toEqual([['Self.md', '見出し'], ['Self.md', '表示']]);
+  });
+
+  it('行末のブロック ID を取り除く（数式やインラインコード内は残す）', () => {
+    expect(convertNote('段落 ^abc-123\n^solo\n$x^2$ と `a ^b`', ctx()).markdown).toBe('段落\n\n$x^2$ と `a ^b`');
+  });
+
+  it('リスト項目内の字下げされた callout も字下げを保って変換する', () => {
+    expect(convertNote('- 親\n  > [!tip] T\n  > 本文\n- 次', ctx()).markdown).toBe('- 親\n  <callout icon="🔥" color="green_bg">**T**<br>本文</callout>\n- 次');
+  });
+
+  it('新しい正規表現は大量反復でも短時間で終える', () => {
+    for (const evil of ['![a](<' + 'x'.repeat(50_000), '[a](b ' + '"'.repeat(50_000), '^[' + 'a'.repeat(50_000), ' ^a'.repeat(30_000) + '!', '<!--'.repeat(20_000), ' '.repeat(50_000) + '> [!x'] ) {
+      const started = Date.now();
+      convertNote(evil, ctx());
+      expect(Date.now() - started).toBeLessThan(1_000);
+    }
+  });
+});
