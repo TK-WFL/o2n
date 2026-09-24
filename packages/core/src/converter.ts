@@ -236,9 +236,10 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
     const line = lines[i] ?? '';
     // ReDoS対策（CodeQL js/polynomial-redos）: 種別の後ろに空白量指定を置くと `(.*)` と重なるため
     // 量指定子を置かず、タイトルは後段で trim する。
-    const calloutMatch = /^>[ \t]?\[!(\w+)\]([-+]?)(.*)$/.exec(line);
+    // リスト項目の中の callout（`- 項目\n  > [!note]`、#141）は字下げ付きで現れる。字下げを保ったまま変換する
+    const calloutMatch = /^([ \t]*)>[ \t]?\[!(\w+)\]([-+]?)(.*)$/.exec(line);
     if (calloutMatch) {
-      const [, rawType, fold, titleText] = calloutMatch;
+      const [, indent = '', rawType, fold, titleText] = calloutMatch;
       const type = (rawType ?? '').toLowerCase();
       const style = CALLOUT_TYPE_MAP[type] ?? DEFAULT_CALLOUT;
       if (!CALLOUT_TYPE_MAP[type]) {
@@ -246,8 +247,8 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
       }
       const bodyLines: string[] = [];
       let j = i + 1;
-      while (j < lines.length && /^>\s?/.test(lines[j] ?? '')) {
-        bodyLines.push((lines[j] ?? '').replace(/^>\s?/, ''));
+      while (j < lines.length && (lines[j] ?? '').startsWith(`${indent}>`)) {
+        bodyLines.push((lines[j] ?? '').slice(indent.length).replace(/^>\s?/, ''));
         j += 1;
       }
       const title = (titleText ?? '').trim() || type.charAt(0).toUpperCase() + type.slice(1);
@@ -256,9 +257,9 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
         // 実ワークスペース検証（docs/questions.md §19）: <details> は複数行形式で toggle ブロックになり、
         // 内側の <callout> も子ブロックとして保持される。`+`（既定で開く）は通常 callout のまま。
         const bodyOnly = bodyLines.length > 0 ? `\n${renderCallout(style, null, bodyLines, entries, sourcePath)}` : '';
-        out.push(`<details>\n<summary>**${title}**</summary>${bodyOnly}\n</details>`);
+        out.push(indentBlock(`<details>\n<summary>**${title}**</summary>${bodyOnly}\n</details>`, indent));
       } else {
-        out.push(renderCallout(style, title, bodyLines, entries, sourcePath));
+        out.push(indentBlock(renderCallout(style, title, bodyLines, entries, sourcePath), indent));
       }
       i = j;
       continue;
@@ -267,6 +268,10 @@ function convertCallouts(text: string, entries: ReportEntry[], sourcePath: strin
     i += 1;
   }
   return out.join('\n');
+}
+
+function indentBlock(block: string, indent: string): string {
+  return indent ? block.split('\n').map((l) => indent + l).join('\n') : block;
 }
 
 /**
@@ -360,7 +365,45 @@ function convertHighlights(text: string): string {
  * `%% … %%` コメントを削除する。fence 分割の前に本文全体へ適用し、コメントがコードブロックを
  * またいでいても削除する（#106）。ただしコードブロック内にある `%%` は区切りとして扱わない。
  */
+/** fence 内とインラインコードを同じ長さの空白で伏せた文字列（区切り文字を探す専用） */
+function maskCode(text: string): string {
+  const lines = text.split('\n');
+  const inFence = new Array<boolean>(lines.length).fill(false);
+  for (const r of findFenceRanges(lines)) for (let i = r.start; i <= r.end; i += 1) inFence[i] = true;
+  return lines
+    .map((line, i) => (inFence[i] ? ' '.repeat(line.length) : line.replace(/``[^`\n]+(?:`[^`\n]+)*``|`[^`\n]+`/g, (m) => ' '.repeat(m.length))))
+    .join('\n');
+}
+
+/**
+ * `<!-- … -->`（HTML コメント）を削除する（#137）。Obsidian は閲覧時に表示しないが、Notion ではそのまま
+ * 本文として表示されていた（`%% %%` と同じ情報漏れ）。コードブロック・インラインコード内は対象外
+ */
+function stripHtmlComments(text: string, entries: ReportEntry[], sourcePath: string): string {
+  if (!text.includes('<!--')) return text;
+  const masked = maskCode(text);
+  let out = '';
+  let last = 0;
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const start = masked.indexOf('<!--', from);
+    if (start === -1) break;
+    const end = masked.indexOf('-->', start + 4);
+    if (end === -1) break;
+    out += text.slice(last, start);
+    last = end + 3;
+    from = last;
+    count += 1;
+  }
+  if (count === 0) return text;
+  out += text.slice(last);
+  entries.push({ category: 'downgraded', path: sourcePath, message: `HTMLコメントを${count}件削除しました` });
+  return out;
+}
+
 function stripComments(text: string, entries: ReportEntry[], sourcePath: string): string {
+  text = stripHtmlComments(text, entries, sourcePath);
   const lines = text.split('\n');
   const inFence = new Array<boolean>(lines.length).fill(false);
   for (const r of findFenceRanges(lines)) for (let i = r.start; i <= r.end; i += 1) inFence[i] = true;
@@ -399,11 +442,31 @@ function stripComments(text: string, entries: ReportEntry[], sourcePath: string)
 function expandFootnotes(text: string, entries: ReportEntry[], sourcePath: string): string {
   // ReDoS対策: `gm` により行ごとにマッチを試みるため、1行あたりのバックトラックが小さくても
   // 行数分積み上がる（`[` を除外する前は、`[^` で始まる行を2万行与えると約9.5秒かかった）。
-  const defRe = /^\[\^([^[\]]+)\]:[ \t]*(.+)$/gm;
+  const defRe = /^\[\^([^[\]]+)\]:[ \t]*(.+)$/;
   const defs = new Map<string, string>();
-  const withoutDefs = text.replace(defRe, (_m, id, body) => {
-    defs.set(id, body.trim());
-    return '';
+  // 定義の直後に字下げ（4 スペース or タブ）で続く行は同じ脚注の続き（#141）。以前は続きの行が
+  // 本文に字下げ付きで残っていた
+  const lines = text.split('\n');
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = defRe.exec(lines[i]!);
+    if (!m) {
+      kept.push(lines[i]!);
+      continue;
+    }
+    const parts = [m[2]!.trim()];
+    while (i + 1 < lines.length && /^(?: {4}|\t)\S/.test(lines[i + 1]!)) {
+      parts.push(lines[i + 1]!.trim());
+      i += 1;
+    }
+    defs.set(m[1]!, parts.join(' '));
+    kept.push('');
+  }
+  let withoutDefs = kept.join('\n');
+  // インライン脚注 `^[本文]`（#141）も同じく文中展開する
+  withoutDefs = withoutDefs.replace(/\^\[([^[\]\n]+)\]/g, (_m, body: string) => {
+    entries.push({ category: 'downgraded', path: sourcePath, message: 'インライン脚注を文中展開に降格しました' });
+    return ` (${body.trim()})`;
   });
   if (defs.size === 0) return withoutDefs;
   // ReDoS対策（WIKILINK_RE と同じ理由で `[` を除外。脚注IDに `[` は現れない）
@@ -436,7 +499,7 @@ function makeFilePlaceholder(): string {
 // 50,000文字程度で約10秒かかっていた（除外後は同入力で0ms）。
 // Obsidianはファイル名に `[` `]` を使えないため、正当なwikilinkの解釈は変わらない。
 // alias側から `|` を除外しているのも同じ理由（aliasに `|` は現れない）。
-const WIKILINK_RE = /(!?)\[\[([^[\]|#]+)(?:#(\^?[^[\]|]+))?(?:\|([^[\]]*))?\]\]/g;
+const WIKILINK_RE = /(!?)\[\[([^[\]|#]*)(?:#(\^?[^[\]|]+))?(?:\|([^[\]]*))?\]\]/g;
 
 const ATTACHMENT_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp',
@@ -552,6 +615,21 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
     const alias = aliasRaw === undefined ? undefined : aliasParts.filter((s) => !/^\d+(x\d+)?$/.test(s)).join('|') || undefined;
     const ext = target.includes('.') ? target.split('.').pop()!.toLowerCase() : '';
 
+    if (target === '') {
+      // 同じノート内へのリンク `[[#見出し]]` / `[[#^id]]`（#141）。以前は正規表現に一致せず `[[#…]]` の
+      // 文字がそのまま残っていた。自ページへのリンクにし、見出し単位の移動は降格として報告する
+      if (!anchor) return raw;
+      const label = alias?.trim() || anchor.replace(/^\^/, '');
+      if (isEmbed) {
+        entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `同じノート内の埋め込み "![[#${anchor}]]" は文字として残しました` });
+        return label;
+      }
+      entries.push({ category: 'downgraded', path: ctx.sourcePath, message: `同じノート内のリンク "[[#${anchor}]]" はページ先頭リンクに降格しました` });
+      const placeholder = makeLinkPlaceholder();
+      pendingLinks.push({ placeholder, targetPath: ctx.sourcePath, fallbackText: label, displayText: label });
+      return placeholder;
+    }
+
     if (isEmbed && ATTACHMENT_EXTENSIONS.has(ext)) {
       const resolved = ctx.resolveAttachment(target);
       const placeholder = makeFilePlaceholder();
@@ -623,8 +701,11 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
 // ReDoS対策（WIKILINK_RE と同じ理由で `[` を除外）: 除外前は `[a` の大量反復を与えると
 // 角括弧テキスト部が貪欲に食べては戻る二次オーダーのバックトラックが起き、
 // 50,000反復で2〜3秒かかっていた。Markdownの入れ子リンクは元々不正な記法のため解釈は変わらない。
-const MD_IMAGE_RE = /!\[([^[\]]*)\]\(([^)\s]+)\)/g;
-const MD_LINK_RE = /\[([^[\]]+)\]\(([^)\s]+)\)/g;
+// リンク先は CommonMark の `<スペース入り パス>` 形式と、末尾の `"タイトル"` も受け付ける（#141）。
+// 各選択肢の文字集合が排他（`<…>` は `>` を含まない、裸のパスは空白と `)` を含まない）でバックトラックしない
+const MD_DEST = String.raw`\((?:<([^<>\n]+)>|([^)\s<]+))(?:[ \t]+"[^"\n]*")?\)`;
+const MD_IMAGE_RE = new RegExp(String.raw`!\[([^[\]]*)\]` + MD_DEST, 'g');
+const MD_LINK_RE = new RegExp(String.raw`\[([^[\]]+)\]` + MD_DEST, 'g');
 
 function convertMarkdownLinksAndImages(
   text: string,
@@ -633,7 +714,8 @@ function convertMarkdownLinksAndImages(
   pendingLinks: PendingLink[],
   pendingFiles: PendingFile[],
 ): string {
-  let result = text.replace(MD_IMAGE_RE, (raw, alt, url) => {
+  let result = text.replace(MD_IMAGE_RE, (raw, alt, angled: string | undefined, bare: string | undefined) => {
+    const url = angled ?? bare ?? '';
     if (/^https?:\/\//i.test(url)) return raw; // 外部URL画像はそのまま
     const decoded = decodeURIComponent(url);
     const resolved = ctx.resolveAttachment(decoded) ?? ctx.resolveAttachment(path.posix.basename(decoded));
@@ -645,7 +727,8 @@ function convertMarkdownLinksAndImages(
     return placeholder;
   });
 
-  result = result.replace(MD_LINK_RE, (raw, text_: string, url: string) => {
+  result = result.replace(MD_LINK_RE, (raw, text_: string, angled: string | undefined, bare: string | undefined) => {
+    const url = angled ?? bare ?? '';
     if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('#')) return raw; // 外部URL（スキーム付き）/ページ内アンカーはそのまま
     // `note.md#見出し` の見出し部分は Notion のページ先頭リンクに降格する（wikilink の見出しリンクと同じ扱い、#109）
     const hashIdx = url.indexOf('#');
@@ -708,6 +791,9 @@ function convertInline(text: string, ctx: ConverterContext, acc: ConversionAccum
   t = convertMarkdownLinksAndImages(t, ctx, acc.entries, acc.pendingLinks, acc.pendingFiles);
   t = convertHighlights(t);
   t = expandFootnotes(t, acc.entries, ctx.sourcePath);
+  // ブロック ID（`段落 ^abc123`、単独行の `^abc123`）は Obsidian では表示されないが、Notion では文字として
+  // 残っていた（#141）。行末のものだけを取り除く（数式の `x^2` 等は直前が空白でないので対象外）
+  t = t.replace(/(^|[ \t])\^[A-Za-z0-9-]+[ \t]*$/gm, '');
   return restore(t);
 }
 

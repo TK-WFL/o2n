@@ -175,8 +175,10 @@ Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop /
 | `- [ ]` `- [x]` | To-do. `[/]` `[-]` etc. are normalized to unchecked with the original marker kept in the text |
 | `#` … `####` | Headings (h5/h6 are downgraded to h4 and recorded) |
 | Math `$…$` `$$…$$`, mermaid | Passed through |
-| `%% comments %%` | Removed (even across code blocks) |
-| `[^1]` footnotes | Expanded inline |
+| `%% comments %%` `<!-- comments -->` | Removed (even across code blocks) |
+| `[^1]` footnotes, `^[inline footnotes]` | Expanded inline |
+| `[[#heading]]` (same note) | Link to the page itself |
+| Trailing block IDs `^abc123` | Removed (hidden in Obsidian too) |
 | Inline code and code blocks | Left untouched |
 | Excalidraw notes | Migrated as the exported image (`.png` / `.svg`) when one exists, otherwise skipped |
 | `.canvas` `.base`, Dataview results | Unsupported (recorded in the report) |
