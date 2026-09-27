@@ -136,6 +136,27 @@ npx @tk_wfl/o2n-cli login
 
 ## 🤖 MCP サーバーとして使う
 
+### Claude のプラグインとして使う（Claude Code）
+
+[`plugin/`](plugin/) は Claude のプラグインです。MCP サーバーの起動設定が入っており、トークンなどは有効化したときに表示される設定画面で入力します。
+
+```bash
+git clone https://github.com/TK-WFL/o2n.git
+claude --plugin-dir ./o2n/plugin
+```
+
+| 設定 | 内容 |
+|---|---|
+| Allowed vault paths | 読んでよい vault の絶対パス（カンマ区切り）。これ以外は拒否 |
+| Notion token | 個人アクセストークン推奨。OS の安全な保管場所に入る。空なら `o2n login --token` で保存したものを使う |
+| Allow writing to Notion | 既定オフ。オフの間は走査・計画・dry-run のみ |
+| Confirmation phrase | 16 文字以上。本実行はこの文字列を Claude が渡したときだけ始まる |
+| Notion requests per second | 1〜10（既定 2） |
+
+プラグインが動くのは、ローカルの MCP サーバーを起動できる Claude Code です。Cowork は設定画面を出さないため、許可する vault が空のままになり使えません。claude.ai のチャットはローカルの MCP サーバーを起動しません。何を読み・書き・送るかは [plugin/README.md](plugin/README.md) にまとめています。
+
+### MCP 設定に直接登録する
+
 Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` を登録します。
 
 ```json
@@ -162,7 +183,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 | `resume_migration` / `cancel_migration` | 続きから再開 / ノート境界で中断 |
 | `migration_status` / `verify_migration` / `get_report` | 進捗・検証・レポート |
 
-🔒 **安全設計**: `O2N_ALLOWED_VAULTS` に無い vault へはアクセスできません。Notion への本実行は既定で無効で、`O2N_ENABLE_MCP_WRITE=1` と `O2N_MCP_WRITE_TOKEN` を設定したうえで `commit_migration` に確認トークンを渡す必要があります。失敗・拒否の応答は `isError` 付きで返ります。
+🔒 **安全設計**: `O2N_ALLOWED_VAULTS` に無い vault へはアクセスできません。Notion への本実行は既定で無効で、`O2N_ENABLE_MCP_WRITE=1`（`true` も可）と `O2N_MCP_WRITE_TOKEN` を設定したうえで `commit_migration` に確認トークンを渡す必要があります。失敗・拒否の応答は `isError` 付きで返ります。
 
 ---
 
@@ -245,6 +266,7 @@ packages/
   core/          # scanner / planner / converter / migrator / state / notion / report
   cli/           # o2n コマンド（core の薄いラッパー）
   mcp-server/    # stdio MCP サーバー（core の薄いラッパー）
+plugin/        # Claude のプラグイン（MCP サーバーの起動設定と設定項目）
 services/
   auth-proxy/    # `o2n login` 用の OAuth コード交換代理（Cloudflare Worker）
 fixtures/test-vault/  # 全構文網羅のテスト用 vault

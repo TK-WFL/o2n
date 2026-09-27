@@ -153,3 +153,16 @@ jobs:
             --generate-notes \
             --draft
           echo "draft release $tag created (target $GITHUB_SHA)"
+      - name: Advance plugin-release branch
+        # Anthropic のプラグインディレクトリはこのブランチを追従する（#165）。plugin/.mcp.json は
+        # npm のバージョンを固定しているので、npm 公開が成功した後でだけ進める（main に追従させると、
+        # バージョン更新のマージから公開までの間、まだ存在しないバージョンを指すプラグインが配られる）。
+        # force=false なので早送りのみ（古いコミットへ戻すことはない）
+        run: |
+          ref="heads/plugin-release"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/$ref" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/$ref" -f sha="$GITHUB_SHA" -F force=false >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/$ref" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          echo "plugin-release -> $GITHUB_SHA"

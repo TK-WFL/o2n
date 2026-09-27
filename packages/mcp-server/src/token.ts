@@ -17,3 +17,12 @@ export async function notionTokenFor(dryRun: boolean, env: NodeJS.ProcessEnv = p
   if (resolved) return resolved.token;
   return dryRun ? 'dry-run-placeholder-token' : null;
 }
+
+/**
+ * `O2N_ENABLE_MCP_WRITE` のような on/off の環境変数を読む。従来の `1` に加え、Claude のプラグイン設定の
+ * チェックボックス（boolean）から渡る `true` も有効とみなす（#165）。それ以外（空・`0`・`false` 等）は無効
+ */
+export function isTruthyFlag(value: string | undefined): boolean {
+  const v = value?.trim().toLowerCase();
+  return v === '1' || v === 'true';
+}

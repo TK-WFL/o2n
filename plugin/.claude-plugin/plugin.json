@@ -1,0 +1,50 @@
+{
+  "name": "o2n",
+  "displayName": "o2n",
+  "version": "0.6.0",
+  "description": "Migrate an Obsidian vault into Notion from a conversation: keeps folders, wikilinks, frontmatter, Dataview fields and attachments, with a dry run first and resumable runs.",
+  "author": {
+    "name": "TK-WFL",
+    "url": "https://github.com/TK-WFL"
+  },
+  "homepage": "https://github.com/TK-WFL/o2n#readme",
+  "repository": "https://github.com/TK-WFL/o2n",
+  "license": "MIT",
+  "keywords": ["obsidian", "notion", "migration", "markdown", "vault"],
+  "userConfig": {
+    "allowed_vaults": {
+      "type": "string",
+      "title": "Allowed vault paths",
+      "description": "Absolute path of each Obsidian vault o2n may read, separated by commas. o2n refuses every other folder.",
+      "default": ""
+    },
+    "notion_token": {
+      "type": "string",
+      "title": "Notion token",
+      "description": "A Notion personal access token (recommended) or internal integration token. Leave empty to use a token saved with `npx @tk_wfl/o2n-cli login --token`.",
+      "sensitive": true,
+      "default": ""
+    },
+    "enable_write": {
+      "type": "boolean",
+      "title": "Allow writing to Notion",
+      "description": "Off: o2n only scans, plans and runs dry runs. On: a real migration can create pages in Notion, and only after Claude passes the confirmation phrase below.",
+      "default": false
+    },
+    "write_confirmation_token": {
+      "type": "string",
+      "title": "Confirmation phrase",
+      "description": "At least 16 characters. A real migration starts only when Claude passes this exact phrase, so tell it to Claude in chat only when you want the migration to run.",
+      "sensitive": true,
+      "default": ""
+    },
+    "requests_per_second": {
+      "type": "number",
+      "title": "Notion requests per second",
+      "description": "1 to 10. Keep 2 or 3 on Notion Free and Plus. Business and Enterprise allow up to 10, which makes large migrations faster.",
+      "default": 2,
+      "min": 1,
+      "max": 10
+    }
+  }
+}

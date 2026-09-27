@@ -30,7 +30,7 @@ import {
   noteConcurrencyFromEnv,
 } from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
-import { MISSING_TOKEN_MESSAGE, notionTokenFor } from './token.js';
+import { isTruthyFlag, MISSING_TOKEN_MESSAGE, notionTokenFor } from './token.js';
 import { cancelJob, getJob, loadJob, MAX_CONCURRENT_JOBS, registerController, releaseController, runningJobCount, setJob } from './jobs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -68,7 +68,7 @@ function allowedVaultRoots(): string[] | null {
 }
 
 function mcpWriteEnabled(): boolean {
-  return process.env.O2N_ENABLE_MCP_WRITE === '1';
+  return isTruthyFlag(process.env.O2N_ENABLE_MCP_WRITE);
 }
 
 function writeTokenMatches(token: string): boolean {
@@ -81,7 +81,12 @@ async function guardVaultPath(vaultPath: string): Promise<{ error: ReturnType<ty
   try {
     const roots = allowedVaultRoots();
     if (!roots) {
-      return { error: errorText('O2N_ALLOWED_VAULTS が未設定のため、MCPからのvaultアクセスを拒否しました。許可するvaultの実パスをカンマ区切りで設定してください。') };
+      return {
+        error: errorText(
+          'O2N_ALLOWED_VAULTS が未設定のため、MCPからのvaultアクセスを拒否しました。許可するvaultの実パスをカンマ区切りで設定してください' +
+            '（Claude のプラグインとして使っている場合は、プラグインの設定「Allowed vault paths」）。',
+        ),
+      };
     }
     const resolved = await assertObsidianVault(vaultPath, { allowedVaultRoots: roots });
     return { error: null, vaultPath: resolved };
@@ -158,7 +163,7 @@ server.tool(
   async ({ vaultPath, patch }) => {
     const guard = await guardVaultPath(vaultPath);
     if (guard.error) return guard.error;
-    if (!mcpWriteEnabled()) return errorText('MCPからの計画更新は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください。');
+    if (!mcpWriteEnabled()) return errorText('MCPからの計画更新は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください（Claude のプラグインでは設定「Allow writing to Notion」をオンにし、「Confirmation phrase」を設定）。');
     if (!patch.confirmationToken || !writeTokenMatches(patch.confirmationToken)) return errorText('confirmationToken が一致しないため、計画更新を拒否しました。');
     const plan = await loadOrCreatePlan(guard.vaultPath);
     if (patch.parentPageId) plan.parentPageId = patch.parentPageId;
@@ -185,7 +190,7 @@ server.tool(
     if (guard.error) return guard.error;
     const resolved = guard.vaultPath;
     if (!dryRun && !mcpWriteEnabled()) {
-      return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 と O2N_MCP_WRITE_TOKEN を設定し、commit_migrationで確認トークンを渡してください。');
+      return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 と O2N_MCP_WRITE_TOKEN を設定し、commit_migrationで確認トークンを渡してください（Claude のプラグインでは設定「Allow writing to Notion」をオンにし、「Confirmation phrase」を設定）。');
     }
 
     const inventory = await scanVault(resolved);
@@ -328,7 +333,7 @@ server.tool(
       return errorText('requestId の有効期限が切れました。prepare_migration をやり直してください。');
     }
     if (!prepared.dryRun) {
-      if (!mcpWriteEnabled()) return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください。');
+      if (!mcpWriteEnabled()) return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください（Claude のプラグインでは設定「Allow writing to Notion」をオンにし、「Confirmation phrase」を設定）。');
       if (!confirmationToken || !writeTokenMatches(confirmationToken)) return errorText('confirmationToken が一致しないため、本実行を拒否しました。');
     }
     const inventory = await scanVault(prepared.vaultPath);
@@ -367,7 +372,7 @@ server.tool(
     const guard = await guardVaultPath(vaultPath);
     if (guard.error) return guard.error;
     if (!dryRun) {
-      if (!mcpWriteEnabled()) return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください。');
+      if (!mcpWriteEnabled()) return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください（Claude のプラグインでは設定「Allow writing to Notion」をオンにし、「Confirmation phrase」を設定）。');
       if (!confirmationToken || !writeTokenMatches(confirmationToken)) return errorText('confirmationToken が一致しないため、再開を拒否しました。');
     }
     let plan;
