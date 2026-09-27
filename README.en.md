@@ -44,6 +44,8 @@ In the [Notion developer portal → Personal access tokens](https://www.notion.s
 
 ```bash
 export NOTION_TOKEN=ntn_xxx
+# or save it once (paste at the prompt; no env var needed afterwards)
+npx @tk_wfl/o2n-cli login --token
 ```
 
 > 💡 With a **personal access token (PAT)** there is no per-page "Connect" step, and the Free-plan block limit (see below) does not apply. Other options: [Connecting to Notion](#-connecting-to-notion).
@@ -66,7 +68,7 @@ npx @tk_wfl/o2n-cli verify  <vaultPath> --deep      # compare against the real N
 
 If it stops halfway, `npx @tk_wfl/o2n-cli resume <vaultPath>` continues where it left off.
 
-> 🧑‍💻 **Not comfortable with the command line?** Register o2n as an MCP server in Claude Code / Claude Desktop and just say "migrate this vault to Notion" → [Using as an MCP server](#-using-as-an-mcp-server)
+> 🧑‍💻 **Not comfortable with the command line?** Use o2n as a Claude plugin (Claude Code / Cowork) or an MCP server and just say "migrate this vault to Notion" → [Using as an MCP server](#-using-as-an-mcp-server)
 
 ---
 
@@ -190,7 +192,7 @@ Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop /
 | Tool | Purpose |
 |---|---|
 | `scan_vault` | Scan the vault (read-only) |
-| `get_plan` / `update_plan` | Inspect / adjust the plan (`folders` / `skipList` / `embedMode`) |
+| `get_plan` / `update_plan` | Inspect / adjust the plan (`parentPageId` / `folders` / `skipList` / `embedMode` / `linkStyle` / `inlineFields`) |
 | `prepare_migration` | Freeze what will be migrated (target, destination, counts) and return a `requestId` |
 | `commit_migration` | Run the frozen request; real writes require a confirmation token |
 | `resume_migration` / `cancel_migration` | Continue / stop at a note boundary |
