@@ -68,4 +68,14 @@ describe('Claude plugin manifest (#165)', () => {
     const prose = readme.replace(/```[\s\S]*?```/g, '');
     expect(prose.split(/\s+/).filter(Boolean).length).toBeGreaterThanOrEqual(40);
   });
+
+  it('ディレクトリ用のアイコン（正方形・128px 以上の SVG）がある (#169)', async () => {
+    const svg = await fs.readFile(path.join(pluginRoot, '.claude-plugin', 'icon.svg'), 'utf-8');
+    const m = svg.match(/viewBox="0 0 (\d+) (\d+)"/);
+    expect(m).not.toBeNull();
+    expect(m![1]).toBe(m![2]);
+    expect(Number(m![1])).toBeGreaterThanOrEqual(128);
+    // 外部参照やスクリプトを含まない
+    expect(svg).not.toMatch(/<script|href=|<image/i);
+  });
 });
