@@ -256,6 +256,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 - `.o2n/state.json` は vault・計画・Notion ワークスペースに署名で結合され、取り違えを検知
 - 悪意のある vault で処理をハングさせる ReDoS への対策済み
 - Notion API 以外への通信なし（テレメトリなし）。npm パッケージは Trusted Publishing（OIDC）で **provenance 付き**で公開
+- 何を読み・送り・保存するか、その消し方は [プライバシーポリシー](PRIVACY.md) にまとめています
 
 <details>
 <summary><b><code>o2n login</code>（OAuth 連携）の仕組みと信頼モデル</b></summary>

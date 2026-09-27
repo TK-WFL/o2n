@@ -255,6 +255,7 @@ If 60%+ of a folder's direct notes share 3 or more frontmatter keys, o2n **sugge
 - `.o2n/state.json` is bound by signature to the vault, the plan and the Notion workspace, so mix-ups are detected
 - Hardened against ReDoS from malicious vaults
 - No network traffic other than the Notion API (no telemetry). npm packages are published via Trusted Publishing (OIDC) **with provenance**
+- The [privacy policy](PRIVACY.md) lists what o2n reads, sends and stores, and how to delete it
 
 <details>
 <summary><b>How <code>o2n login</code> (OAuth) works and its trust model</b></summary>

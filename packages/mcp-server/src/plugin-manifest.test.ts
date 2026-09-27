@@ -78,4 +78,14 @@ describe('Claude plugin manifest (#165)', () => {
     // 外部参照やスクリプトを含まない
     expect(svg).not.toMatch(/<script|href=|<image/i);
   });
+
+  it('プライバシーポリシーを参照している (#175)', async () => {
+    const manifest = await readJson<PluginManifest & { privacyPolicyUrl?: string }>(path.join(pluginRoot, '.claude-plugin', 'plugin.json'));
+    const url = 'https://github.com/TK-WFL/o2n/blob/main/PRIVACY.md';
+    expect(manifest.privacyPolicyUrl).toBe(url);
+    const readme = await fs.readFile(path.join(pluginRoot, 'README.md'), 'utf-8');
+    expect(readme).toMatch(/^## Privacy$/m);
+    expect(readme).toContain(url);
+    await expect(fs.access(path.join(repoRoot, 'PRIVACY.md'))).resolves.toBeUndefined();
+  });
 });

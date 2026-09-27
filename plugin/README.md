@@ -73,6 +73,10 @@ The tools are `scan_vault`, `get_plan`, `update_plan`, `prepare_migration`, `com
 - **Sends**: note content, properties and attachments go only to the Notion API at `api.notion.com`, using your token. o2n has no telemetry and no other network destinations.
 - **Changes in Notion**: it creates pages, databases and file uploads under the parent page you choose. When a note changed since the last run, it replaces that page's content with the new version. It never deletes or trashes Notion pages.
 
+## Privacy
+
+o2n sends nothing to its developer and has no telemetry. See the [privacy policy](https://github.com/TK-WFL/o2n/blob/main/PRIVACY.md) for what it reads, sends and stores, and how to delete it.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
