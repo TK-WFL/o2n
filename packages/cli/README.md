@@ -43,5 +43,21 @@ npx @tk_wfl/o2n-cli report <vaultPath>
 
 Exit codes: `0` = fully succeeded, `1` = some notes failed, `2` = fatal error.
 
+## Settings for the MCP server and the Claude plugin
+
+These save the settings that `@tk_wfl/o2n-mcp-server` uses when its own environment leaves them
+empty, for example in Cowork, which shows no plugin settings dialog. They are stored in
+`~/.o2n/mcp-settings.json` (mode 600).
+
+```bash
+npx @tk_wfl/o2n-cli mcp allow <vaultPath>      # let the MCP server read this vault
+npx @tk_wfl/o2n-cli mcp disallow <vaultPath>
+npx @tk_wfl/o2n-cli mcp write on               # allow real runs and set the confirmation phrase
+npx @tk_wfl/o2n-cli mcp write off
+npx @tk_wfl/o2n-cli mcp status                 # never prints the phrase
+```
+
+`mcp allow` and `mcp write on` only work in an interactive terminal.
+
 See the [main README](https://github.com/TK-WFL/o2n#readme) for the full command reference,
 what gets converted, and the security model.

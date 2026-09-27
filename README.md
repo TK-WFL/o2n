@@ -44,6 +44,8 @@ Notion の標準インポートは Obsidian 特有の書き方を解釈しない
 
 ```bash
 export NOTION_TOKEN=ntn_xxx
+# または一度だけ保存（プロンプトに貼り付け。以降は設定不要）
+npx @tk_wfl/o2n-cli login --token
 ```
 
 > 💡 **個人アクセストークン（PAT）** なら、移行先ページを integration に接続する手順が不要で、Free プランのブロック上限（後述）の対象外です。他の方法は [Notion との連携方法](#-notion-との連携方法) を参照。
@@ -66,7 +68,7 @@ npx @tk_wfl/o2n-cli verify  <vaultのパス> --deep      # Notion の実ペー�
 
 途中で止まっても `npx @tk_wfl/o2n-cli resume <vaultのパス>` で続きから再開できます。
 
-> 🧑‍💻 **コマンドが苦手な方へ**: Claude Code / Claude Desktop に MCP サーバーとして登録すると、「この vault を Notion に移行して」と話しかけるだけで進められます → [MCP サーバーとして使う](#-mcp-サーバーとして使う)
+> 🧑‍💻 **コマンドが苦手な方へ**: Claude のプラグイン（Claude Code / Cowork）か MCP サーバーとして使うと、「この vault を Notion に移行して」と話しかけるだけで進められます → [MCP サーバーとして使う](#-mcp-サーバーとして使う)
 
 ---
 
@@ -191,7 +193,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 | ツール | 役割 |
 |---|---|
 | `scan_vault` | vault を走査（読み取りのみ） |
-| `get_plan` / `update_plan` | 計画の確認・調整（`folders` / `skipList` / `embedMode`） |
+| `get_plan` / `update_plan` | 計画の確認・調整（`parentPageId` / `folders` / `skipList` / `embedMode` / `linkStyle` / `inlineFields`） |
 | `prepare_migration` | 移行内容（対象・移行先・件数）を固定して `requestId` を返す |
 | `commit_migration` | 固定した内容を実行。本実行には確認トークンが必須 |
 | `resume_migration` / `cancel_migration` | 続きから再開 / ノート境界で中断 |
