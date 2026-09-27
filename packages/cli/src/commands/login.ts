@@ -92,7 +92,7 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
 function disabledLoginMessage(): string {
   return [
     '`o2n login` のブラウザOAuthは、既存のpoll方式にトークン窃取リスクが見つかったため既定で停止しています。',
-    '当面は Notion の internal integration token を発行し、環境変数 NOTION_TOKEN に設定してください。',
+    '代わりに Notion の個人アクセストークン（または internal integration のトークン）を発行し、`o2n login --token` で保存するか、環境変数 NOTION_TOKEN に設定してください。',
     '既に未信頼Vaultを処理した、または旧 `o2n login` を利用した場合は、Notion側で該当トークンを失効・再発行してください。',
     `新しいloopback方式を検証目的で使う場合のみ ${ENABLE_BROWSER_LOGIN_ENV}=1 を設定してください。`,
   ].join('\n');
@@ -212,7 +212,7 @@ export async function loginCommand(): Promise<number> {
 
   if (AUTH_PROXY_URL.includes('PLACEHOLDER') || NOTION_OAUTH_CLIENT_ID.includes('PLACEHOLDER')) {
     console.error(
-      'OAuth連携先が未設定です（services/auth-proxy未デプロイ）。代わりに NOTION_TOKEN 環境変数を使ってください。',
+      'OAuth連携先が未設定です（services/auth-proxy未デプロイ）。代わりに `o2n login --token` でトークンを保存するか、NOTION_TOKEN 環境変数を使ってください。',
     );
     return 2;
   }
@@ -272,8 +272,12 @@ export async function logoutCommand(): Promise<number> {
 
 export async function whoamiCommand(): Promise<number> {
   const existing = await loadCredentials();
+  if (process.env.NOTION_TOKEN?.trim()) {
+    console.log('環境変数 NOTION_TOKEN のトークンを使っています（保存済みの認証情報より優先されます）。');
+    if (!existing) return 0;
+  }
   if (!existing) {
-    console.log('未連携です。`o2n login` を実行するか、NOTION_TOKEN 環境変数を設定してください。');
+    console.log('未連携です。`o2n login --token` でトークンを保存するか、NOTION_TOKEN 環境変数を設定してください。');
     return 1;
   }
   console.log(`連携済みワークスペース: ${existing.workspaceName ?? '(不明)'}`);

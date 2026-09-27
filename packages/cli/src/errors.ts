@@ -7,7 +7,7 @@ export function describeError(err: unknown): string {
   if (err instanceof NotionBlockLimitError) return err.message;
   if (err instanceof NotionApiError) {
     if (err.status === 401) {
-      return 'Notion のトークンが無効です（401）。期限切れ・失効・貼り間違いの可能性があります。開発者ポータルでトークンを再発行し、NOTION_TOKEN を設定し直してください。';
+      return 'Notion のトークンが無効です（401）。期限切れ・失効・貼り間違いの可能性があります。トークンを再発行し、`o2n login --token` で保存し直すか NOTION_TOKEN を設定し直してください。';
     }
     if (err.status === 404) {
       return `${err.message}\n移行先ページが見つかりません。ページIDを確認し、internal integration を使っている場合はそのページを integration に接続（Connect）してください（個人アクセストークンなら接続は不要）。`;

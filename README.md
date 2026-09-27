@@ -90,7 +90,16 @@ npx @tk_wfl/o2n-cli verify  <vaultのパス> --deep      # Notion の実ペー�
 
 ## 🔑 Notion との連携方法
 
-トークンは常に `NOTION_TOKEN` 環境変数で渡します（コマンドライン引数では受け取りません — シェル履歴への漏洩防止）。
+トークンの渡し方は2通りです。どちらもコマンドライン引数では受け取りません（シェル履歴への漏洩防止）。
+
+- **環境変数 `NOTION_TOKEN`** に設定する
+- **`o2n login --token` で保存する**：プロンプトに貼り付ける（入力は表示されません）か、標準入力で渡します。Notion に接続して有効なことを確かめてから `~/.o2n/credentials.json`（パーミッション 600）に保存し、以降は CLI と MCP サーバーが自動で使います。解除は `o2n logout`
+
+```bash
+npx @tk_wfl/o2n-cli login --token
+```
+
+両方ある場合は `NOTION_TOKEN` が優先されます（空文字なら未設定扱い）。
 
 <details>
 <summary><b>方法 A: 個人アクセストークン（PAT）— 推奨</b></summary>
@@ -203,7 +212,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 
 ## 🛡 セキュリティ
 
-- トークンは環境変数 `NOTION_TOKEN` か `~/.o2n/credentials.json`（パーミッション 600）にのみ保存
+- トークンは環境変数 `NOTION_TOKEN` か `~/.o2n/credentials.json`（パーミッション 600、`o2n login --token` で作成）にのみ保存
 - vault 本体は **常に読み取り専用**。書き込むのは `.o2n/` ディレクトリのみ
 - frontmatter は YAML のみ受け付け、`---js` / `---json` などはそのノートだけを安全にスキップ
 - vault 内のシンボリックリンクは辿らない。`.o2n/` と `~/.o2n/` は symlink / hardlink / TOCTOU 攻撃を防ぐ形で読み書き
