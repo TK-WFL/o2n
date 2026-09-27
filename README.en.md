@@ -135,6 +135,27 @@ Disabled by default because the old OAuth polling flow allowed token theft. Only
 
 ## 🤖 Using as an MCP server
 
+### As a Claude plugin (Claude Code)
+
+[`plugin/`](plugin/) is a Claude plugin. It carries the MCP server launch settings, and you enter the token and other values in the settings dialog shown when you enable it.
+
+```bash
+git clone https://github.com/TK-WFL/o2n.git
+claude --plugin-dir ./o2n/plugin
+```
+
+| Setting | What it does |
+|---|---|
+| Allowed vault paths | Absolute paths of the vaults o2n may read, comma-separated. Everything else is refused |
+| Notion token | A personal access token is recommended. Stored in the OS secure store. If empty, the token saved with `o2n login --token` is used |
+| Allow writing to Notion | Off by default. While off, only scan, plan and dry run work |
+| Confirmation phrase | At least 16 characters. A real migration starts only when Claude passes this phrase |
+| Notion requests per second | 1 to 10 (default 2) |
+
+The plugin works in Claude Code, which can start local MCP servers. Cowork shows no settings dialog, so the allowed vault list stays empty and nothing can be read. Chat on claude.ai does not start local MCP servers. [plugin/README.md](plugin/README.md) lists what the plugin reads, writes and sends.
+
+### Registering it directly in MCP settings
+
 Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop / Claude Code.
 
 ```json
@@ -161,7 +182,7 @@ Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop /
 | `resume_migration` / `cancel_migration` | Continue / stop at a note boundary |
 | `migration_status` / `verify_migration` / `get_report` | Progress, verification, report |
 
-🔒 **Safety by design**: vaults not listed in `O2N_ALLOWED_VAULTS` cannot be accessed. Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and `O2N_MCP_WRITE_TOKEN`, then pass the confirmation token to `commit_migration`. Failures and refusals are returned with `isError`.
+🔒 **Safety by design**: vaults not listed in `O2N_ALLOWED_VAULTS` cannot be accessed. Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` (or `true`) and `O2N_MCP_WRITE_TOKEN`, then pass the confirmation token to `commit_migration`. Failures and refusals are returned with `isError`.
 
 ---
 
@@ -244,6 +265,7 @@ packages/
   core/          # scanner / planner / converter / migrator / state / notion / report
   cli/           # the o2n command (thin wrapper over core)
   mcp-server/    # stdio MCP server (thin wrapper over core)
+plugin/        # Claude plugin (MCP server launch settings and user settings)
 services/
   auth-proxy/    # OAuth code-exchange proxy for `o2n login` (Cloudflare Worker)
 fixtures/test-vault/  # test vault covering every supported syntax

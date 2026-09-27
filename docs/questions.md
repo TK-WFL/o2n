@@ -282,3 +282,12 @@ Pass3 はプレースホルダーを含むブロックの直後に添付ブロ�
 `PATCH /blocks/:id` でプレースホルダー文字列だけを取り除く（周囲の文章は残る）。
 実ワークスペースで `md リンク: … / [添付](document.pdf) / … の後` の段落が
 `md リンク: … /  / … の後` ＋ 直後に pdf ブロック、となることを確認した。
+
+## 23. Claude プラグインの設定値は既定値のまま文字列で MCP サーバーに渡る（2026-09-27）
+
+`plugin/` を Claude Code 2.1.283 で `--plugin-dir` 読み込みし、環境変数を記録するだけのサーバーに差し替えて確認した。
+
+- 設定していない `userConfig` は `default` の値で置き換わる。文字列は `""`、boolean の `false` は文字列 `"false"`、number の `2` は `"2"` として環境変数に入った。
+- そのため boolean の「Allow writing to Notion」をオンにすると `O2N_ENABLE_MCP_WRITE=true` になる。サーバーは従来の `1` に加えて `true` も有効とみなす（#165）。
+- トークン欄が空だと `NOTION_TOKEN=""` になる。空は未設定として扱い、`o2n login --token` で保存したトークンへフォールバックする（#164）。
+- Cowork は設定画面を出さず、既定値のない設定を参照するサーバーを起動しない（公式ドキュメント「Plugin feature support across platforms」）。そのためすべての設定に既定値を置いている。既定値のままでは許可 vault が空になり、Cowork からは vault を読めない。

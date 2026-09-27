@@ -45,10 +45,11 @@ These settings cannot be enforced by a pull request. Repository administrators m
 
 ## npm Release Runbook
 
-1. Set the same new version in core, CLI, and MCP package manifests. CLI and MCP must depend on `@tk_wfl/o2n-core` at `^<same version>`, and the lockfile must match.
+1. Set the same new version in core, CLI, and MCP package manifests. CLI and MCP must depend on `@tk_wfl/o2n-core` at `^<same version>`, and the lockfile must match. Also set that version in `plugin/.claude-plugin/plugin.json` and in the `@tk_wfl/o2n-mcp-server@<version>` pin in `plugin/.mcp.json`.
 2. Merge the version change to `main`; never publish from a dirty local checkout.
 3. Dispatch **Publish npm packages** from `main` with that exact version and approve the protected `npm-publish` environment.
 4. The unprivileged verification job installs from lockfiles, runs type checks, tests, full audits, clean builds, tarball inspection, and registry collision checks. It passes only fixed-name, checksummed tarballs through an immutable Actions artifact.
 5. After environment approval, the OIDC-enabled job checks out no repository code and publishes only those verified tarballs with provenance. It publishes core first, confirms that version is visible on npm, then publishes CLI and MCP.
 6. If a later publish fails, do not blindly rerun: inspect npm provenance and package contents before deciding how to recover.
 7. After a successful publish, a separate job (the only one with `contents: write`) creates a **draft** GitHub Release tagged `v<version>` at the published commit, with notes generated from the merged PR titles. Review the notes and press "Publish release"; nothing is public until then. If a release for that tag already exists, the job skips.
+8. The same job then fast-forwards the `plugin-release` branch to the published commit. Anthropic's plugin directory tracks that branch, so the Claude plugin in `plugin/` only reaches users once the npm version it pins (`plugin/.mcp.json`) exists. The plugin's `version` and pin must equal the package version; a unit test fails the build if they drift.

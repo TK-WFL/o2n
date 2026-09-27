@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "o2n": {
+      "command": "npx",
+      "args": ["-y", "@tk_wfl/o2n-mcp-server@0.6.0"],
+      "env": {
+        "NOTION_TOKEN": "${user_config.notion_token}",
+        "O2N_ALLOWED_VAULTS": "${user_config.allowed_vaults}",
+        "O2N_ENABLE_MCP_WRITE": "${user_config.enable_write}",
+        "O2N_MCP_WRITE_TOKEN": "${user_config.write_confirmation_token}",
+        "O2N_REQUESTS_PER_SECOND": "${user_config.requests_per_second}"
+      }
+    }
+  }
+}

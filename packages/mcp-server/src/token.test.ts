@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveCredentials } from '@tk_wfl/o2n-core';
-import { MISSING_TOKEN_MESSAGE, notionTokenFor } from './token.js';
+import { isTruthyFlag, MISSING_TOKEN_MESSAGE, notionTokenFor } from './token.js';
 
 let testRoot: string;
 
@@ -40,4 +40,9 @@ describe('notionTokenFor (#164)', () => {
     expect(MISSING_TOKEN_MESSAGE).toContain('login --token');
     expect(MISSING_TOKEN_MESSAGE).toContain('NOTION_TOKEN');
   });
+});
+
+describe('isTruthyFlag (#165)', () => {
+  it.each(['1', 'true', 'TRUE', ' true '])('%j は有効', (v) => expect(isTruthyFlag(v)).toBe(true));
+  it.each([undefined, '', '0', 'false', 'yes', 'on'])('%j は無効', (v) => expect(isTruthyFlag(v)).toBe(false));
 });

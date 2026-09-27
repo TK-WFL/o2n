@@ -20,7 +20,7 @@ saved with `npx @tk_wfl/o2n-cli login --token` (an empty `NOTION_TOKEN` falls ba
 (developer portal → Personal access tokens → New token); it needs no per-page connect step.
 
 MCP access requires `O2N_ALLOWED_VAULTS=/absolute/path/to/vault` (comma-separated for multiple
-vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` and
+vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` (or `true`) and
 `O2N_MCP_WRITE_TOKEN`, review `prepare_migration`, then pass the confirmation token to
 `commit_migration`.
 
