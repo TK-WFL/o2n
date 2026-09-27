@@ -20,6 +20,8 @@ Requires Node.js 20+.
 
 ```bash
 export NOTION_TOKEN=ntn_xxx
+# or save it once (paste at the hidden prompt, or pipe via stdin; never as an argument)
+npx @tk_wfl/o2n-cli login --token
 ```
 
 Simplest: a **personal access token** from Notion's developer portal (Personal access tokens →

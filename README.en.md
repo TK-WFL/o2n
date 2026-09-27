@@ -90,7 +90,16 @@ If it stops halfway, `npx @tk_wfl/o2n-cli resume <vaultPath>` continues where it
 
 ## 🔑 Connecting to Notion
 
-The token is always passed through the `NOTION_TOKEN` env var (never as a CLI argument — avoids leaking it into shell history).
+There are two ways to provide the token. Neither takes it as a CLI argument (that would leak it into shell history).
+
+- **Set the `NOTION_TOKEN` env var**
+- **Save it with `o2n login --token`**: paste it at the prompt (input is hidden) or pipe it via stdin. o2n checks the token against Notion, then saves it to `~/.o2n/credentials.json` (mode 600), and the CLI and MCP server use it from then on. Remove it with `o2n logout`
+
+```bash
+npx @tk_wfl/o2n-cli login --token
+```
+
+If both exist, `NOTION_TOKEN` wins (an empty value counts as unset).
 
 <details>
 <summary><b>Option A: personal access token (PAT) — recommended</b></summary>
@@ -202,7 +211,7 @@ If 60%+ of a folder's direct notes share 3 or more frontmatter keys, o2n **sugge
 
 ## 🛡 Security
 
-- The token lives only in the `NOTION_TOKEN` env var or `~/.o2n/credentials.json` (mode 600)
+- The token lives only in the `NOTION_TOKEN` env var or `~/.o2n/credentials.json` (mode 600, created by `o2n login --token`)
 - The vault itself is **always read-only**; o2n writes only inside `.o2n/`
 - Only YAML frontmatter is parsed; `---js` / `---json` etc. skip just that note, safely
 - Symlinks inside the vault are never followed. `.o2n/` and `~/.o2n/` are read and written with symlink / hardlink / TOCTOU protections

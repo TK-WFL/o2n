@@ -11,6 +11,7 @@ import { resumeCommand } from './commands/resume.js';
 import { verifyCommand } from './commands/verify.js';
 import { reportCommand } from './commands/report.js';
 import { loginCommand, logoutCommand, whoamiCommand } from './commands/login.js';
+import { loginWithTokenCommand } from './commands/login-token.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(await fs.readFile(path.join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string };
@@ -20,9 +21,21 @@ program.name('o2n').description('Obsidian vault を Notion へ移行するツー
 
 program
   .command('login')
-  .description('ブラウザでNotionと連携する（NOTION_TOKENの手動設定が不要になる）')
-  .action(async () => {
-    process.exitCode = await loginCommand();
+  .description('Notion のトークンを保存する（NOTION_TOKEN の設定が不要になる）')
+  .option('--token', '個人アクセストークン等を入力して保存する。トークンは引数に書かず、プロンプトに貼り付けるか標準入力で渡す')
+  // 余分な引数（`login --token ntn_xxx` のように書かれたトークン）を commander がエラー文にそのまま
+  // 表示しないよう、ここで受け取って値を出さずに断る
+  .allowExcessArguments(true)
+  .action(async (opts: { token?: boolean }, cmd: Command) => {
+    if (cmd.args.length > 0) {
+      console.error(
+        'トークンを引数に書かないでください（シェルの履歴に残ります）。`o2n login --token` だけを実行し、表示されたプロンプトに貼り付けてください。' +
+          '\n既に実行してしまった場合は、念のためトークンを再発行してください。',
+      );
+      process.exitCode = 2;
+      return;
+    }
+    process.exitCode = opts.token ? await loginWithTokenCommand() : await loginCommand();
   });
 
 program

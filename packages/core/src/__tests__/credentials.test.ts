@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearCredentials, loadCredentials, saveCredentials } from '../credentials.js';
+import { clearCredentials, loadCredentials, resolveNotionToken, saveCredentials } from '../credentials.js';
 import { atomicWriteHomeStateFile, readHomeStateFile } from '../local-state-io.js';
 
 let testRoot: string;
@@ -247,5 +247,21 @@ describe('credentials local storage', () => {
     await fs.writeFile(path.join(directoryPath, 'state-signing-key'), 'secret', { mode: 0o600 });
 
     await expect(readHomeStateFile('state-signing-key')).resolves.toBe('secret');
+  });
+});
+
+describe('resolveNotionToken (#164)', () => {
+  it('NOTION_TOKEN があればそれを使う（前後の空白は除く）', async () => {
+    await saveCredentials({ token: 'stored-token', savedAt: '2026-09-27T00:00:00Z' });
+    await expect(resolveNotionToken({ NOTION_TOKEN: '  env-token\n' })).resolves.toEqual({ token: 'env-token', source: 'env' });
+  });
+
+  it.each(['', '   ', undefined])('NOTION_TOKEN が %j なら保存済みの認証情報へフォールバックする', async (value) => {
+    await saveCredentials({ token: 'stored-token', savedAt: '2026-09-27T00:00:00Z' });
+    await expect(resolveNotionToken({ NOTION_TOKEN: value })).resolves.toEqual({ token: 'stored-token', source: 'stored' });
+  });
+
+  it('どちらも無ければ null', async () => {
+    await expect(resolveNotionToken({ NOTION_TOKEN: '' })).resolves.toBeNull();
   });
 });

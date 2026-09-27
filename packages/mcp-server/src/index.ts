@@ -15,7 +15,6 @@ import {
   writeReport,
   buildReport,
   readVaultStateFile,
-  loadCredentials,
   assertObsidianVault,
   NotAnObsidianVaultError,
   VaultNotAllowedError,
@@ -31,6 +30,7 @@ import {
   noteConcurrencyFromEnv,
 } from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
+import { MISSING_TOKEN_MESSAGE, notionTokenFor } from './token.js';
 import { cancelJob, getJob, loadJob, MAX_CONCURRENT_JOBS, registerController, releaseController, runningJobCount, setJob } from './jobs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -243,8 +243,8 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
 
     void (async () => {
       try {
-        const token = process.env.NOTION_TOKEN ?? (await loadCredentials())?.token ?? (dryRun ? 'dry-run-placeholder-token' : '');
-        if (!token) throw new Error('Notionと連携されていません。CLIで `o2n login` を実行するか、NOTION_TOKEN を設定してください。');
+        const token = await notionTokenFor(dryRun);
+        if (!token) throw new Error(MISSING_TOKEN_MESSAGE);
         const client = new NotionClient({ token, dryRun, rateLimit: rateLimitFromEnv() });
         const api = new NotionApi(client);
         const me = dryRun ? undefined : await api.getMe();
@@ -437,8 +437,8 @@ server.tool(
     const summary = summarizeState(state, inventory);
     if (!deep) return text(JSON.stringify(summary, null, 2));
 
-    const token = process.env.NOTION_TOKEN ?? (await loadCredentials())?.token ?? '';
-    if (!token) return errorText('Notionと連携されていません。NOTION_TOKEN を設定してください。');
+    const token = await notionTokenFor(false);
+    if (!token) return errorText(MISSING_TOKEN_MESSAGE);
     const api = new NotionApi(new NotionClient({ token, dryRun: false, rateLimit: rateLimitFromEnv() }));
     const result = await deepVerifyNotes(api, state, { orphaned: summary.orphaned });
     return text(JSON.stringify({ ...summary, deep: result }, null, 2));
