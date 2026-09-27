@@ -12,6 +12,7 @@ import { verifyCommand } from './commands/verify.js';
 import { reportCommand } from './commands/report.js';
 import { loginCommand, logoutCommand, whoamiCommand } from './commands/login.js';
 import { loginWithTokenCommand } from './commands/login-token.js';
+import { mcpAllowCommand, mcpDisallowCommand, mcpStatusCommand, mcpWriteCommand } from './commands/mcp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(await fs.readFile(path.join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string };
@@ -50,6 +51,41 @@ program
   .description('現在連携中のNotionワークスペースを表示する')
   .action(async () => {
     process.exitCode = await whoamiCommand();
+  });
+
+const mcp = program
+  .command('mcp')
+  .description('MCP サーバー（Claude のプラグイン）の許可 vault・書き込み許可を保存する。Cowork など設定画面の無い環境向け');
+
+mcp
+  .command('allow')
+  .description('MCP サーバーがこの vault を読むことを許可する（ターミナルから実行したときのみ）')
+  .argument('<vaultPath>', 'Obsidian vaultのパス')
+  .action(async (vaultPath: string) => {
+    process.exitCode = await mcpAllowCommand(vaultPath);
+  });
+
+mcp
+  .command('disallow')
+  .description('vault の許可を取り消す')
+  .argument('<vaultPath>', 'Obsidian vaultのパス')
+  .action(async (vaultPath: string) => {
+    process.exitCode = await mcpDisallowCommand(vaultPath);
+  });
+
+mcp
+  .command('write')
+  .description('Notion への書き込みを on（確認フレーズを設定、ターミナルから実行したときのみ）/ off にする')
+  .argument('<mode>', 'on | off')
+  .action(async (mode: string) => {
+    process.exitCode = await mcpWriteCommand(mode);
+  });
+
+mcp
+  .command('status')
+  .description('保存された設定と、実際に使われる設定を表示する（確認フレーズの値は表示しない）')
+  .action(async () => {
+    process.exitCode = await mcpStatusCommand();
   });
 
 program

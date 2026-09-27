@@ -24,6 +24,7 @@ Useful details:
 - If you processed an untrusted vault with an older version, revoke and re-issue the Notion token.
 - If you used the old browser OAuth login flow, revoke and re-issue the stored Notion token.
 - Prefer `NOTION_TOKEN` until browser OAuth has been re-enabled and verified in your deployment.
+- `o2n mcp allow` and `o2n mcp write on` refuse to run without an interactive terminal, so an agent calling the CLI through an ordinary tool cannot widen its own MCP access. This is a safeguard against accidental or automated changes, not a hard boundary: a process that can allocate a pseudo-terminal or edit `~/.o2n/mcp-settings.json` directly can still change the settings. The confirmation phrase only protects real runs while the agent does not know it, so do not let an agent generate or read it.
 
 ## Operational Hardening
 

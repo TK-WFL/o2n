@@ -6,7 +6,7 @@ import type { FileHandle } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
 
 export type VaultStateFileName = 'plan.json' | 'report.md' | 'report.dry-run.md' | 'state.json' | 'job.json';
-export type HomeStateFileName = 'credentials.json' | 'state-signing-key';
+export type HomeStateFileName = 'credentials.json' | 'state-signing-key' | 'mcp-settings.json';
 
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 const DIRECTORY = constants.O_DIRECTORY ?? 0;

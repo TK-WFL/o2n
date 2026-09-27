@@ -291,3 +291,12 @@ Pass3 はプレースホルダーを含むブロックの直後に添付ブロ�
 - そのため boolean の「Allow writing to Notion」をオンにすると `O2N_ENABLE_MCP_WRITE=true` になる。サーバーは従来の `1` に加えて `true` も有効とみなす（#165）。
 - トークン欄が空だと `NOTION_TOKEN=""` になる。空は未設定として扱い、`o2n login --token` で保存したトークンへフォールバックする（#164）。
 - Cowork は設定画面を出さず、既定値のない設定を参照するサーバーを起動しない（公式ドキュメント「Plugin feature support across platforms」）。そのためすべての設定に既定値を置いている。既定値のままでは許可 vault が空になり、Cowork からは vault を読めない。
+
+## 24. Cowork では保存ファイル（~/.o2n/mcp-settings.json）の設定で MCP サーバーを動かす（2026-09-27）
+
+Cowork はプラグインの設定画面を出さないため、MCP サーバーには既定値（空・`false`）が渡る。#170 で、環境変数が空または `false` の項目は `o2n mcp allow` / `o2n mcp write on` で保存した値を使うようにした。
+
+- 確認方法：設定を一切渡さずにプラグイン（ローカルビルドのサーバーを指す検証用コピー）を Claude Code で読み込み、Cowork と同じ条件を作った。この状態で会話から実移行し、32 ノート・14 添付が完了し、`verify --deep` の不一致は 0 件だった。
+- `mcp write off` の後は本実行を、`mcp disallow` の後は走査を拒否することも確認した。
+- Cowork 実機では未確認。Cowork のローカルセッションで、MCP サーバーの HOME が利用者のホームになる前提に立っている。
+- `mcp allow` と `mcp write on` は対話端末でしか受け付けない。ただし疑似端末（`script` や Python の `pty`）で回避できることを確認しているので、誤操作・自動実行を防ぐ歯止めであって防御境界ではない（SECURITY.md に記載）。

@@ -28,9 +28,12 @@ import {
   deepVerifyNotes,
   summarizeState,
   noteConcurrencyFromEnv,
+  McpSettingsError,
+  resolveMcpAccess,
+  type McpAccess,
 } from '@tk_wfl/o2n-core';
 import { loadOrCreatePlan, savePlan } from './plan-store.js';
-import { isTruthyFlag, MISSING_TOKEN_MESSAGE, notionTokenFor } from './token.js';
+import { MISSING_TOKEN_MESSAGE, notionTokenFor } from './token.js';
 import { cancelJob, getJob, loadJob, MAX_CONCURRENT_JOBS, registerController, releaseController, runningJobCount, setJob } from './jobs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,38 +63,40 @@ interface PreparedMigration {
 const PREPARE_TTL_MS = 10 * 60 * 1000;
 const preparedMigrations = new Map<string, PreparedMigration>();
 
-function allowedVaultRoots(): string[] | null {
-  const raw = process.env.O2N_ALLOWED_VAULTS;
-  if (!raw) return null;
-  const roots = raw.split(',').map((p) => p.trim()).filter(Boolean);
-  return roots.length > 0 ? roots : null;
+const CLI = 'npx @tk_wfl/o2n-cli';
+const WRITE_DISABLED_HINT =
+  `設定するには次のどれかを使ってください。\n` +
+  `- Claude のプラグイン（Claude Code）: 設定「Allow writing to Notion」をオンにし、「Confirmation phrase」を設定\n` +
+  `- Cowork やその他: ターミナルで \`${CLI} mcp write on\` を実行\n` +
+  `- MCP 設定の環境変数: O2N_ENABLE_MCP_WRITE=1 と O2N_MCP_WRITE_TOKEN`;
+
+/** 許可 vault・書き込み許可・確認フレーズ。環境変数か ~/.o2n/mcp-settings.json から毎回読む（#170） */
+async function access(): Promise<McpAccess> {
+  return resolveMcpAccess();
 }
 
-function mcpWriteEnabled(): boolean {
-  return isTruthyFlag(process.env.O2N_ENABLE_MCP_WRITE);
-}
-
-function writeTokenMatches(token: string): boolean {
-  const configured = process.env.O2N_MCP_WRITE_TOKEN;
-  return configured !== undefined && configured.length >= 16 && token === configured;
+function writeTokenMatches(current: McpAccess, token: string | undefined): boolean {
+  return current.writeToken !== null && token !== undefined && token === current.writeToken;
 }
 
 /** vaultPathが実際にObsidian vaultらしいディレクトリでなければエラーを返す（任意パスアクセス対策） */
 async function guardVaultPath(vaultPath: string): Promise<{ error: ReturnType<typeof errorText> } | { error: null; vaultPath: string }> {
   try {
-    const roots = allowedVaultRoots();
+    const roots = (await access()).allowedVaults;
     if (!roots) {
       return {
         error: errorText(
-          'O2N_ALLOWED_VAULTS が未設定のため、MCPからのvaultアクセスを拒否しました。許可するvaultの実パスをカンマ区切りで設定してください' +
-            '（Claude のプラグインとして使っている場合は、プラグインの設定「Allowed vault paths」）。',
+          '許可された vault が無いため、MCP からの vault アクセスを拒否しました。次のどれかで vault を許可してください。\n' +
+            '- Claude のプラグイン（Claude Code）: 設定「Allowed vault paths」に vault の絶対パスを入れる\n' +
+            `- Cowork やその他: ターミナルで \`${CLI} mcp allow <vaultのパス>\` を実行\n` +
+            '- MCP 設定の環境変数: O2N_ALLOWED_VAULTS に実パスをカンマ区切りで設定',
         ),
       };
     }
     const resolved = await assertObsidianVault(vaultPath, { allowedVaultRoots: roots });
     return { error: null, vaultPath: resolved };
   } catch (err) {
-    if (err instanceof NotAnObsidianVaultError || err instanceof VaultNotAllowedError) {
+    if (err instanceof NotAnObsidianVaultError || err instanceof VaultNotAllowedError || err instanceof McpSettingsError) {
       return { error: errorText(err.message) };
     }
     throw err;
@@ -145,7 +150,7 @@ const folderPlanSchema = z.object({
 
 server.tool(
   'update_plan',
-  '移行計画を部分更新する（folders・parentPageId・skipListなど）。O2N_ENABLE_MCP_WRITE=1 と確認トークンが必要。',
+  '移行計画を部分更新する（folders・parentPageId・skipListなど）。書き込み許可（O2N_ENABLE_MCP_WRITE か `o2n mcp write on`）と確認フレーズが必要。',
   {
     vaultPath: z.string().describe('Obsidian vaultの絶対パス'),
     patch: z
@@ -163,8 +168,9 @@ server.tool(
   async ({ vaultPath, patch }) => {
     const guard = await guardVaultPath(vaultPath);
     if (guard.error) return guard.error;
-    if (!mcpWriteEnabled()) return errorText('MCPからの計画更新は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください（Claude のプラグインでは設定「Allow writing to Notion」をオンにし、「Confirmation phrase」を設定）。');
-    if (!patch.confirmationToken || !writeTokenMatches(patch.confirmationToken)) return errorText('confirmationToken が一致しないため、計画更新を拒否しました。');
+    const current = await access();
+    if (!current.writeEnabled) return errorText(`MCPからの計画更新は無効です。${WRITE_DISABLED_HINT}`);
+    if (!writeTokenMatches(current, patch.confirmationToken)) return errorText('confirmationToken が一致しないため、計画更新を拒否しました。');
     const plan = await loadOrCreatePlan(guard.vaultPath);
     if (patch.parentPageId) plan.parentPageId = patch.parentPageId;
     if (patch.folders) plan.folders = patch.folders;
@@ -189,8 +195,8 @@ server.tool(
     const guard = await guardVaultPath(vaultPath);
     if (guard.error) return guard.error;
     const resolved = guard.vaultPath;
-    if (!dryRun && !mcpWriteEnabled()) {
-      return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 と O2N_MCP_WRITE_TOKEN を設定し、commit_migrationで確認トークンを渡してください（Claude のプラグインでは設定「Allow writing to Notion」をオンにし、「Confirmation phrase」を設定）。');
+    if (!dryRun && !(await access()).writeEnabled) {
+      return errorText(`MCPからの本実行は無効です。${WRITE_DISABLED_HINT}`);
     }
 
     const inventory = await scanVault(resolved);
@@ -221,7 +227,7 @@ server.tool(
           planHash: request.planHash,
           commitInstructions: dryRun
             ? 'commit_migration に requestId を渡すとdry-runを開始します。'
-            : '本実行には O2N_ENABLE_MCP_WRITE=1 と O2N_MCP_WRITE_TOKEN に一致する confirmationToken が必要です。',
+            : '本実行には書き込み許可と、設定した確認フレーズに一致する confirmationToken が必要です。',
         },
         null,
         2,
@@ -320,10 +326,10 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
 
 server.tool(
   'commit_migration',
-  'prepare_migrationで固定した内容を実行する。dry-run以外はO2N_MCP_WRITE_TOKENと一致するconfirmationTokenが必須。',
+  'prepare_migrationで固定した内容を実行する。dry-run以外は設定した確認フレーズと一致するconfirmationTokenが必須。',
   {
     requestId: z.string().describe('prepare_migrationが返したrequestId'),
-    confirmationToken: z.string().optional().describe('本実行時にO2N_MCP_WRITE_TOKENと一致している必要がある確認トークン'),
+    confirmationToken: z.string().optional().describe('本実行時に、設定した確認フレーズ（O2N_MCP_WRITE_TOKEN か `o2n mcp write on`）と一致している必要がある確認トークン'),
   },
   async ({ requestId, confirmationToken }) => {
     const prepared = preparedMigrations.get(requestId);
@@ -333,8 +339,9 @@ server.tool(
       return errorText('requestId の有効期限が切れました。prepare_migration をやり直してください。');
     }
     if (!prepared.dryRun) {
-      if (!mcpWriteEnabled()) return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください（Claude のプラグインでは設定「Allow writing to Notion」をオンにし、「Confirmation phrase」を設定）。');
-      if (!confirmationToken || !writeTokenMatches(confirmationToken)) return errorText('confirmationToken が一致しないため、本実行を拒否しました。');
+      const current = await access();
+      if (!current.writeEnabled) return errorText(`MCPからの本実行は無効です。${WRITE_DISABLED_HINT}`);
+      if (!writeTokenMatches(current, confirmationToken)) return errorText('confirmationToken が一致しないため、本実行を拒否しました。');
     }
     const inventory = await scanVault(prepared.vaultPath);
     const plan = await loadOrCreatePlan(prepared.vaultPath, prepared.parentPageId);
@@ -362,18 +369,19 @@ server.tool(
 
 server.tool(
   'resume_migration',
-  '中断・失敗した移行を、vault 内の既存の計画（.o2n/plan.json）と state から続きから再開する。dry-run 以外は commit_migration と同じく O2N_ENABLE_MCP_WRITE=1 と confirmationToken が必須。',
+  '中断・失敗した移行を、vault 内の既存の計画（.o2n/plan.json）と state から続きから再開する。dry-run 以外は commit_migration と同じく書き込み許可と confirmationToken が必須。',
   {
     vaultPath: z.string().describe('Obsidian vaultの絶対パス'),
     dryRun: z.boolean().default(false).describe('trueの場合、書き込みAPIを呼ばずシミュレーションのみ行う'),
-    confirmationToken: z.string().optional().describe('本実行時にO2N_MCP_WRITE_TOKENと一致している必要がある確認トークン'),
+    confirmationToken: z.string().optional().describe('本実行時に、設定した確認フレーズ（O2N_MCP_WRITE_TOKEN か `o2n mcp write on`）と一致している必要がある確認トークン'),
   },
   async ({ vaultPath, dryRun, confirmationToken }) => {
     const guard = await guardVaultPath(vaultPath);
     if (guard.error) return guard.error;
     if (!dryRun) {
-      if (!mcpWriteEnabled()) return errorText('MCPからの本実行は無効です。O2N_ENABLE_MCP_WRITE=1 を設定してください（Claude のプラグインでは設定「Allow writing to Notion」をオンにし、「Confirmation phrase」を設定）。');
-      if (!confirmationToken || !writeTokenMatches(confirmationToken)) return errorText('confirmationToken が一致しないため、再開を拒否しました。');
+      const current = await access();
+      if (!current.writeEnabled) return errorText(`MCPからの本実行は無効です。${WRITE_DISABLED_HINT}`);
+      if (!writeTokenMatches(current, confirmationToken)) return errorText('confirmationToken が一致しないため、再開を拒否しました。');
     }
     let plan;
     try {
