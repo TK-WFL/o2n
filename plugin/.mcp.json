@@ -2,7 +2,7 @@
   "mcpServers": {
     "o2n": {
       "command": "npx",
-      "args": ["-y", "@tk_wfl/o2n-mcp-server@0.6.1"],
+      "args": ["-y", "@tk_wfl/o2n-mcp-server@0.7.0"],
       "env": {
         "NOTION_TOKEN": "${user_config.notion_token}",
         "O2N_ALLOWED_VAULTS": "${user_config.allowed_vaults}",
