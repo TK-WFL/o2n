@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="o2n">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <!-- left: linked notes (the vault) -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round">
+    <line x1="50" y1="100" x2="96" y2="94"/>
+    <line x1="50" y1="100" x2="74" y2="158"/>
+    <line x1="96" y1="94" x2="74" y2="158"/>
+  </g>
+  <g fill="#FFFFFF">
+    <circle cx="50" cy="100" r="15"/>
+    <circle cx="96" cy="94" r="12"/>
+    <circle cx="74" cy="158" r="18"/>
+  </g>
+  <!-- middle: arrow -->
+  <g fill="none" stroke="#C7D2FE" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M116 128 H144"/>
+    <path d="M134 116 L146 128 L134 140"/>
+  </g>
+  <!-- right: a page -->
+  <path d="M170 68 H200 L218 86 V182 A10 10 0 0 1 208 192 H170 A10 10 0 0 1 160 182 V78 A10 10 0 0 1 170 68 Z" fill="#FFFFFF"/>
+  <path d="M200 68 V86 H218 Z" fill="#E0E7FF"/>
+  <g stroke="#6D28D9" stroke-width="7" stroke-linecap="round">
+    <line x1="174" y1="110" x2="204" y2="110"/>
+    <line x1="174" y1="130" x2="204" y2="130"/>
+    <line x1="174" y1="150" x2="194" y2="150"/>
+  </g>
+</svg>
