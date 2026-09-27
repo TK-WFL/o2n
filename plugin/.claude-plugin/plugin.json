@@ -10,6 +10,7 @@
   "homepage": "https://github.com/TK-WFL/o2n#readme",
   "repository": "https://github.com/TK-WFL/o2n",
   "license": "MIT",
+  "privacyPolicyUrl": "https://github.com/TK-WFL/o2n/blob/main/PRIVACY.md",
   "keywords": [
     "obsidian",
     "notion",
