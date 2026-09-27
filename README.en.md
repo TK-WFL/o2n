@@ -80,6 +80,10 @@ If it stops halfway, `npx @tk_wfl/o2n-cli resume <vaultPath>` continues where it
 | `resume <vault>` | Continue an interrupted or failed migration (idempotent) | `--quiet` |
 | `verify <vault>` | Reconcile state with the vault; `--deep` also checks the real Notion pages | `--deep` `--json` |
 | `report <vault>` | Show the latest report (`.o2n/report.md`) | |
+| `login --token` | Save the Notion token (input is hidden) | |
+| `mcp allow <vault>` / `mcp disallow <vault>` | Save or remove a vault the MCP server (plugin) may read | |
+| `mcp write on` / `mcp write off` | Save or clear write access to Notion and the confirmation phrase for the MCP server | |
+| `mcp status` | Show the saved MCP settings and the ones actually in effect | |
 
 - If you move or rename notes after migrating, `resume` detects it and moves/renames the same Notion page (if the content changed too, a new page is created)
 - `migrate --dry-run` writes its report to `.o2n/report.dry-run.md` and never overwrites the real `report.md`
@@ -152,7 +156,17 @@ claude --plugin-dir ./o2n/plugin
 | Confirmation phrase | At least 16 characters. A real migration starts only when Claude passes this phrase |
 | Notion requests per second | 1 to 10 (default 2) |
 
-The plugin works in Claude Code, which can start local MCP servers. Cowork shows no settings dialog, so the allowed vault list stays empty and nothing can be read. Chat on claude.ai does not start local MCP servers. [plugin/README.md](plugin/README.md) lists what the plugin reads, writes and sends.
+The plugin works in Claude Code and Cowork, which can start local MCP servers. Chat on claude.ai does not start local MCP servers.
+
+**In Cowork** there is no settings dialog, so save the settings in a terminal first. When the plugin settings are empty, the MCP server uses these saved values.
+
+```bash
+npx @tk_wfl/o2n-cli login --token          # Notion token
+npx @tk_wfl/o2n-cli mcp allow <vault path>  # a vault it may read
+npx @tk_wfl/o2n-cli mcp write on            # only when you want real runs; sets the confirmation phrase
+```
+
+`mcp allow` and `mcp write on` only work when run directly in a terminal, so Claude cannot grant itself access through a tool. The values are stored in `~/.o2n/mcp-settings.json` (mode 600). [plugin/README.md](plugin/README.md) lists what the plugin reads, writes and sends.
 
 ### Registering it directly in MCP settings
 
@@ -182,7 +196,7 @@ Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop /
 | `resume_migration` / `cancel_migration` | Continue / stop at a note boundary |
 | `migration_status` / `verify_migration` / `get_report` | Progress, verification, report |
 
-🔒 **Safety by design**: vaults not listed in `O2N_ALLOWED_VAULTS` cannot be accessed. Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` (or `true`) and `O2N_MCP_WRITE_TOKEN`, then pass the confirmation token to `commit_migration`. Failures and refusals are returned with `isError`.
+🔒 **Safety by design**: only allowed vaults (`O2N_ALLOWED_VAULTS` or `o2n mcp allow`) can be accessed. Real writes are disabled by default: enable writing (`O2N_ENABLE_MCP_WRITE=1` or `true`, or `o2n mcp write on`), set a confirmation phrase (`O2N_MCP_WRITE_TOKEN`, or `o2n mcp write on`), and pass that phrase to `commit_migration`. Env vars with a value take precedence over the saved settings. Failures and refusals are returned with `isError`.
 
 ---
 
@@ -232,7 +246,7 @@ If 60%+ of a folder's direct notes share 3 or more frontmatter keys, o2n **sugge
 
 ## 🛡 Security
 
-- The token lives only in the `NOTION_TOKEN` env var or `~/.o2n/credentials.json` (mode 600, created by `o2n login --token`)
+- The token lives only in the `NOTION_TOKEN` env var or `~/.o2n/credentials.json` (mode 600, created by `o2n login --token`). The MCP allowed vaults and confirmation phrase in `~/.o2n/mcp-settings.json` get the same protection
 - The vault itself is **always read-only**; o2n writes only inside `.o2n/`
 - Only YAML frontmatter is parsed; `---js` / `---json` etc. skip just that note, safely
 - Symlinks inside the vault are never followed. `.o2n/` and `~/.o2n/` are read and written with symlink / hardlink / TOCTOU protections

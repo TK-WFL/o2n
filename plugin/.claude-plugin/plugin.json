@@ -10,12 +10,18 @@
   "homepage": "https://github.com/TK-WFL/o2n#readme",
   "repository": "https://github.com/TK-WFL/o2n",
   "license": "MIT",
-  "keywords": ["obsidian", "notion", "migration", "markdown", "vault"],
+  "keywords": [
+    "obsidian",
+    "notion",
+    "migration",
+    "markdown",
+    "vault"
+  ],
   "userConfig": {
     "allowed_vaults": {
       "type": "string",
       "title": "Allowed vault paths",
-      "description": "Absolute path of each Obsidian vault o2n may read, separated by commas. o2n refuses every other folder.",
+      "description": "Absolute path of each Obsidian vault o2n may read, separated by commas. o2n refuses every other folder. Leave empty to use vaults saved with `npx @tk_wfl/o2n-cli mcp allow`.",
       "default": ""
     },
     "notion_token": {
@@ -28,13 +34,13 @@
     "enable_write": {
       "type": "boolean",
       "title": "Allow writing to Notion",
-      "description": "Off: o2n only scans, plans and runs dry runs. On: a real migration can create pages in Notion, and only after Claude passes the confirmation phrase below.",
+      "description": "Off: o2n only scans, plans and runs dry runs, unless you turned writing on with `npx @tk_wfl/o2n-cli mcp write on`. On: a real migration can create pages in Notion, and only after Claude passes the confirmation phrase.",
       "default": false
     },
     "write_confirmation_token": {
       "type": "string",
       "title": "Confirmation phrase",
-      "description": "At least 16 characters. A real migration starts only when Claude passes this exact phrase, so tell it to Claude in chat only when you want the migration to run.",
+      "description": "At least 16 characters. A real migration starts only when Claude passes this exact phrase, so tell it to Claude in chat only when you want the migration to run. Leave empty to use the phrase saved with `npx @tk_wfl/o2n-cli mcp write on`.",
       "sensitive": true,
       "default": ""
     },

@@ -1,5 +1,6 @@
 import { NotionApi, NotionClient, rateLimitFromEnv, saveCredentials } from '@tk_wfl/o2n-core';
 import { describeError } from '../errors.js';
+import { promptHidden } from '../prompt.js';
 
 /**
  * `o2n login --token`：個人アクセストークン（PAT）や internal integration のトークンを
@@ -39,43 +40,6 @@ async function readStdinFirstLine(): Promise<string> {
   }
   const text = Buffer.concat(chunks).toString('utf8');
   return text.split(/\r?\n/).find((line) => line.trim() !== '') ?? '';
-}
-
-function promptHidden(question: string): Promise<string> {
-  const { stdin, stdout } = process;
-  stdout.write(question);
-  return new Promise((resolve, reject) => {
-    let value = '';
-    const cleanup = () => {
-      stdin.off('data', onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-      stdout.write('\n');
-    };
-    const onData = (chunk: string) => {
-      for (const ch of chunk) {
-        if (ch === '\r' || ch === '\n') {
-          cleanup();
-          resolve(value);
-          return;
-        }
-        if (ch === '\u0003' || ch === '\u0004') {
-          cleanup();
-          reject(new Error('入力をキャンセルしました。'));
-          return;
-        }
-        if (ch === '\u007f' || ch === '\b') {
-          value = value.slice(0, -1);
-          continue;
-        }
-        if (ch >= ' ') value += ch;
-      }
-    };
-    stdin.setEncoding('utf8');
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.on('data', onData);
-  });
 }
 
 async function defaultReadToken(): Promise<string> {

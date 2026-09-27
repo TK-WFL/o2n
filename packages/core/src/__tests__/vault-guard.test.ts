@@ -47,4 +47,13 @@ describe('assertObsidianVault', () => {
 
     await expect(assertObsidianVault(vault)).rejects.toBeInstanceOf(NotAnObsidianVaultError);
   });
+
+  it('許可リストに存在しないパスが混ざっていても、他の許可 vault は通す (#170)', async () => {
+    const vault = path.join(tmpDir, 'vault');
+    await fs.mkdir(path.join(vault, '.obsidian'), { recursive: true });
+    const gone = path.join(tmpDir, 'deleted-vault');
+
+    await expect(assertObsidianVault(vault, { allowedVaultRoots: [gone, vault] })).resolves.toBe(await fs.realpath(vault));
+    await expect(assertObsidianVault(vault, { allowedVaultRoots: [gone] })).rejects.toBeInstanceOf(VaultNotAllowedError);
+  });
 });

@@ -16,3 +16,4 @@ export * from './local-state-io.js';
 export * from './verify.js';
 export * from './attachments.js';
 export * from './inline-fields.js';
+export * from './mcp-settings.js';

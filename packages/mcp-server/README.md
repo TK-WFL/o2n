@@ -19,10 +19,12 @@ Requires Node.js 20+, and `NOTION_TOKEN` in the environment the MCP server runs 
 saved with `npx @tk_wfl/o2n-cli login --token` (an empty `NOTION_TOKEN` falls back to the saved one). The simplest token is a Notion **personal access token**
 (developer portal → Personal access tokens → New token); it needs no per-page connect step.
 
-MCP access requires `O2N_ALLOWED_VAULTS=/absolute/path/to/vault` (comma-separated for multiple
-vaults). Real writes are disabled by default; set `O2N_ENABLE_MCP_WRITE=1` (or `true`) and
-`O2N_MCP_WRITE_TOKEN`, review `prepare_migration`, then pass the confirmation token to
-`commit_migration`.
+MCP access requires allowed vaults: set `O2N_ALLOWED_VAULTS=/absolute/path/to/vault` (comma-separated
+for multiple vaults), or save them with `npx @tk_wfl/o2n-cli mcp allow <vault>`. Real writes are disabled
+by default. Enable them with `O2N_ENABLE_MCP_WRITE=1` (or `true`) and `O2N_MCP_WRITE_TOKEN`, or with
+`npx @tk_wfl/o2n-cli mcp write on`, review `prepare_migration`, then pass the confirmation phrase to
+`commit_migration`. Env vars with a value take precedence over the saved settings
+(`~/.o2n/mcp-settings.json`). `mcp allow` and `mcp write on` only work in an interactive terminal.
 
 ## Tools
 

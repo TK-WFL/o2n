@@ -80,6 +80,10 @@ npx @tk_wfl/o2n-cli verify  <vaultのパス> --deep      # Notion の実ペー�
 | `resume <vault>` | 中断・失敗した移行を続きから再開（冪等） | `--quiet` |
 | `verify <vault>` | state と vault の突き合わせ。`--deep` で Notion の実ページとも照合 | `--deep` `--json` |
 | `report <vault>` | 最新のレポート（`.o2n/report.md`）を表示 | |
+| `login --token` | Notion のトークンを保存（入力は表示されない） | |
+| `mcp allow <vault>` / `mcp disallow <vault>` | MCP サーバー（プラグイン）が読んでよい vault を保存・取り消し | |
+| `mcp write on` / `mcp write off` | MCP サーバーからの Notion への書き込みと確認フレーズを保存・解除 | |
+| `mcp status` | 保存された MCP の設定と、実際に使われる設定を表示 | |
 
 - 移行後にノートを別フォルダへ移動・改名しても、`resume` で検知して Notion 上の同じページを移動・改名します（内容も同時に変えた場合は新しいページとして作成）
 - `migrate --dry-run` のレポートは `.o2n/report.dry-run.md` に書かれ、本番の `report.md` を上書きしません
@@ -153,7 +157,17 @@ claude --plugin-dir ./o2n/plugin
 | Confirmation phrase | 16 文字以上。本実行はこの文字列を Claude が渡したときだけ始まる |
 | Notion requests per second | 1〜10（既定 2） |
 
-プラグインが動くのは、ローカルの MCP サーバーを起動できる Claude Code です。Cowork は設定画面を出さないため、許可する vault が空のままになり使えません。claude.ai のチャットはローカルの MCP サーバーを起動しません。何を読み・書き・送るかは [plugin/README.md](plugin/README.md) にまとめています。
+プラグインが動くのは、ローカルの MCP サーバーを起動できる Claude Code と Cowork です。claude.ai のチャットはローカルの MCP サーバーを起動しません。
+
+**Cowork で使う場合**は設定画面が出ないので、先にターミナルで次を実行して設定を保存します。プラグインの設定が空のときは、MCP サーバーがこの保存内容を使います。
+
+```bash
+npx @tk_wfl/o2n-cli login --token          # Notion のトークン
+npx @tk_wfl/o2n-cli mcp allow <vaultのパス>  # 読んでよい vault
+npx @tk_wfl/o2n-cli mcp write on            # 本実行したいとき。確認フレーズを設定
+```
+
+`mcp allow` と `mcp write on` はターミナルで直接実行したときだけ受け付けます（Claude がツール経由で自分に権限を与えられないようにするため）。保存先は `~/.o2n/mcp-settings.json`（パーミッション 600）です。何を読み・書き・送るかは [plugin/README.md](plugin/README.md) にまとめています。
 
 ### MCP 設定に直接登録する
 
@@ -183,7 +197,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 | `resume_migration` / `cancel_migration` | 続きから再開 / ノート境界で中断 |
 | `migration_status` / `verify_migration` / `get_report` | 進捗・検証・レポート |
 
-🔒 **安全設計**: `O2N_ALLOWED_VAULTS` に無い vault へはアクセスできません。Notion への本実行は既定で無効で、`O2N_ENABLE_MCP_WRITE=1`（`true` も可）と `O2N_MCP_WRITE_TOKEN` を設定したうえで `commit_migration` に確認トークンを渡す必要があります。失敗・拒否の応答は `isError` 付きで返ります。
+🔒 **安全設計**: 許可した vault（`O2N_ALLOWED_VAULTS` または `o2n mcp allow`）以外へはアクセスできません。Notion への本実行は既定で無効です。書き込み許可（`O2N_ENABLE_MCP_WRITE=1`、`true` も可。または `o2n mcp write on`）と確認フレーズ（`O2N_MCP_WRITE_TOKEN` または `o2n mcp write on` で設定）を用意し、`commit_migration` にそのフレーズを渡す必要があります。環境変数に値があれば環境変数が優先されます。失敗・拒否の応答は `isError` 付きで返ります。
 
 ---
 
@@ -233,7 +247,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 
 ## 🛡 セキュリティ
 
-- トークンは環境変数 `NOTION_TOKEN` か `~/.o2n/credentials.json`（パーミッション 600、`o2n login --token` で作成）にのみ保存
+- トークンは環境変数 `NOTION_TOKEN` か `~/.o2n/credentials.json`（パーミッション 600、`o2n login --token` で作成）にのみ保存。MCP の許可 vault・確認フレーズの保存先 `~/.o2n/mcp-settings.json` も同じ保護
 - vault 本体は **常に読み取り専用**。書き込むのは `.o2n/` ディレクトリのみ
 - frontmatter は YAML のみ受け付け、`---js` / `---json` などはそのノートだけを安全にスキップ
 - vault 内のシンボリックリンクは辿らない。`.o2n/` と `~/.o2n/` は symlink / hardlink / TOCTOU 攻撃を防ぐ形で読み書き

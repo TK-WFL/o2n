@@ -52,7 +52,8 @@ export async function assertObsidianVault(vaultPath: string, opts: VaultGuardOpt
   }
 
   if (opts.allowedVaultRoots) {
-    const allowed = await Promise.all(opts.allowedVaultRoots.map((p) => canonicalPath(p)));
+    // 許可リストに存在しない（移動・削除された）パスがあっても、他の vault の確認は続ける（#170）
+    const allowed = await Promise.all(opts.allowedVaultRoots.map((p) => canonicalPath(p).catch(() => null)));
     if (!allowed.includes(resolved)) {
       throw new VaultNotAllowedError(resolved);
     }
