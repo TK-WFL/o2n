@@ -1,7 +1,7 @@
 {
   "name": "o2n",
   "displayName": "o2n",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Migrate an Obsidian vault into Notion from a conversation: keeps folders, wikilinks, frontmatter, Dataview fields and attachments, with a dry run first and resumable runs.",
   "author": {
     "name": "TK-WFL",
