@@ -10,7 +10,7 @@ Move an entire vault to Notion while keeping links, folder hierarchy, frontmatte
 [![npm](https://img.shields.io/npm/v/@tk_wfl/o2n-mcp-server?label=o2n-mcp-server&color=cb3837&logo=npm)](https://www.npmjs.com/package/@tk_wfl/o2n-mcp-server)
 [![CI](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml/badge.svg)](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Node](https://img.shields.io/badge/node-%3E%3D22.12-339933?logo=node.js&logoColor=white)
+![Node](https://img.shields.io/badge/node-%3E%3D22.13-339933?logo=node.js&logoColor=white)
 
 English | [日本語](README.md)
 
@@ -38,7 +38,7 @@ Notion's built-in import does not understand Obsidian-specific syntax, so the bi
 
 ## 🚀 Get started in 3 minutes
 
-**You need**: Node.js 22.12 or later, a Notion token, and an Obsidian vault (the plugin and the MCP server only accept vaults that contain a `.obsidian` folder)
+**You need**: Node.js 22.13 or later, a Notion token, and an Obsidian vault (the plugin and the MCP server only accept vaults that contain a `.obsidian` folder)
 
 The steps below use `npx`. If you install it with `npm i -g @tk_wfl/o2n-cli`, you can type `o2n` instead of `npx @tk_wfl/o2n-cli` (that is what `o2n …` means on this page).
 

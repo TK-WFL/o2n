@@ -29,3 +29,16 @@ jobs:
         working-directory: services/auth-proxy
       - run: npm audit
         working-directory: services/auth-proxy
+
+  # CLI が対応する最小の Node.js（packages/cli の engines）でも動くことを確かめる
+  test-min-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci --engine-strict
+      - run: npm run build --workspace packages/core
+      - run: npm test
