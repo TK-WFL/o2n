@@ -13,6 +13,7 @@ import {
   NotionApi,
   StateStore,
   writeReport,
+  reportFileName,
   buildReport,
   readVaultStateFile,
   assertObsidianVault,
@@ -282,7 +283,7 @@ async function startMigrationJob(resolved: string, parentPageId: string, dryRun:
           signal: controller.signal,
         });
         const report = buildReport(state.snapshot, entries, { startedAt, finishedAt: Date.now(), apiCalls: api.callCount, dryRun, before });
-        await writeReport(resolved, report, state.snapshot);
+        await writeReport(resolved, report, state.snapshot, dryRun);
         if (wasAborted(entries)) {
           setJob(resolved, {
             status: controller.signal.aborted ? 'cancelled' : 'error',
@@ -460,13 +461,16 @@ server.tool(
 
 server.tool(
   'get_report',
-  'レポート（.o2n/report.md）の内容を返す。',
-  { vaultPath: z.string().describe('Obsidian vaultの絶対パス') },
-  async ({ vaultPath }) => {
+  'レポート（.o2n/report.md）の内容を返す。dryRun が true なら dry-run のレポート（.o2n/report.dry-run.md）を返す。',
+  {
+    vaultPath: z.string().describe('Obsidian vaultの絶対パス'),
+    dryRun: z.boolean().default(false).describe('trueの場合、dry-run のレポートを返す'),
+  },
+  async ({ vaultPath, dryRun }) => {
     const guard = await guardVaultPath(vaultPath);
     if (guard.error) return guard.error;
     try {
-      const content = await readVaultStateFile(guard.vaultPath, 'report.md');
+      const content = await readVaultStateFile(guard.vaultPath, reportFileName(dryRun));
       return text(content);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
