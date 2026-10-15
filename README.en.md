@@ -10,7 +10,7 @@ Move an entire vault to Notion while keeping links, folder hierarchy, frontmatte
 [![npm](https://img.shields.io/npm/v/@tk_wfl/o2n-mcp-server?label=o2n-mcp-server&color=cb3837&logo=npm)](https://www.npmjs.com/package/@tk_wfl/o2n-mcp-server)
 [![CI](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml/badge.svg)](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)
+![Node](https://img.shields.io/badge/node-%3E%3D22.12-339933?logo=node.js&logoColor=white)
 
 English | [日本語](README.md)
 
@@ -38,6 +38,10 @@ Notion's built-in import does not understand Obsidian-specific syntax, so the bi
 
 ## 🚀 Get started in 3 minutes
 
+**You need**: Node.js 22.12 or later, a Notion token, and an Obsidian vault (the plugin and the MCP server only accept vaults that contain a `.obsidian` folder)
+
+The steps below use `npx`. If you install it with `npm i -g @tk_wfl/o2n-cli`, you can type `o2n` instead of `npx @tk_wfl/o2n-cli` (that is what `o2n …` means on this page).
+
 ### 1. Get a Notion token
 
 In the [Notion developer portal → Personal access tokens](https://www.notion.so/developers/tokens) select **New token**, pick a name and an expiration, and copy the token (it is shown only once).
@@ -55,6 +59,8 @@ npx @tk_wfl/o2n-cli login --token
 ```bash
 npx @tk_wfl/o2n-cli plan <vaultPath> --parent <destination Notion page ID>
 ```
+
+The page ID is the 32-character string at the end of the URL you get from **Copy link** on that page in Notion.
 
 For each folder you choose "page tree" or "database" interactively (folders with consistent frontmatter are suggested as databases automatically).
 
@@ -77,12 +83,14 @@ If it stops halfway, `npx @tk_wfl/o2n-cli resume <vaultPath>` continues where it
 | Command | What it does | Main options |
 |---|---|---|
 | `scan <vault>` | Scan the vault and print counts and an estimated block count (no Notion access) | `--verbose` `--json` |
-| `plan <vault>` | Create the migration plan (`.o2n/plan.json`) interactively | `--parent <id>` `--yes` `--embed-mode inline` `--link-style link` `--out <path>` |
-| `migrate <vault>` | Migrate according to the plan | `--dry-run` `--plan <path>` `--quiet` `--verbose` |
-| `resume <vault>` | Continue an interrupted or failed migration (idempotent) | `--quiet` |
+| `plan <vault>` | Create the migration plan (`.o2n/plan.json`) interactively | `--parent <id>` `--yes` `--embed-mode inline` `--link-style link` `--no-inline-fields` `--out <path>` |
+| `migrate <vault>` | Migrate according to the plan | `--dry-run` `--plan <path>` `--parent <id>` `--quiet` `--verbose` |
+| `resume <vault>` | Continue an interrupted or failed migration (idempotent) | `--quiet` `--verbose` |
 | `verify <vault>` | Reconcile state with the vault; `--deep` also checks the real Notion pages | `--deep` `--json` |
 | `report <vault>` | Show the latest report (`.o2n/report.md`) | |
 | `login --token` | Save the Notion token (input is hidden) | |
+| `logout` | Delete the saved token and disconnect from Notion | |
+| `whoami` | Show the connected Notion workspace | |
 | `mcp allow <vault>` / `mcp disallow <vault>` | Save or remove a vault the MCP server (plugin) may read | |
 | `mcp write on` / `mcp write off` | Save or clear write access to Notion and the confirmation phrase for the MCP server | |
 | `mcp status` | Show the saved MCP settings and the ones actually in effect | |
@@ -154,7 +162,7 @@ claude --plugin-dir ./o2n/plugin
 |---|---|
 | Allowed vault paths | Absolute paths of the vaults o2n may read, comma-separated. Everything else is refused |
 | Notion token | A personal access token is recommended. Stored in the OS secure store. If empty, the token saved with `o2n login --token` is used |
-| Allow writing to Notion | Off by default. While off, only scan, plan and dry run work |
+| Allow writing to Notion | Off by default. While off, only scan, viewing the plan and dry run work. Changing the plan and real runs need write access and the confirmation phrase |
 | Confirmation phrase | At least 16 characters. A real migration starts only when Claude passes this phrase |
 | Notion requests per second | 1 to 10 (default 2) |
 
@@ -164,7 +172,7 @@ The plugin works in Claude Code and Cowork, which can start local MCP servers. C
 
 ```bash
 npx @tk_wfl/o2n-cli login --token          # Notion token
-npx @tk_wfl/o2n-cli mcp allow <vault path>  # a vault it may read
+npx @tk_wfl/o2n-cli mcp allow <vaultPath>   # a vault it may read
 npx @tk_wfl/o2n-cli mcp write on            # only when you want real runs; sets the confirmation phrase
 ```
 
@@ -192,9 +200,9 @@ Register `npx -y @tk_wfl/o2n-mcp-server` in the MCP settings of Claude Desktop /
 | Tool | Purpose |
 |---|---|
 | `scan_vault` | Scan the vault (read-only) |
-| `get_plan` / `update_plan` | Inspect / adjust the plan (`parentPageId` / `folders` / `skipList` / `embedMode` / `linkStyle` / `inlineFields`) |
+| `get_plan` / `update_plan` | Inspect / adjust the plan (`parentPageId` / `folders` / `skipList` / `embedMode` / `linkStyle` / `inlineFields`). Adjusting needs write access and the confirmation phrase |
 | `prepare_migration` | Freeze what will be migrated (target, destination, counts) and return a `requestId` |
-| `commit_migration` | Run the frozen request; real writes require a confirmation token |
+| `commit_migration` | Run the frozen request; real writes require the confirmation phrase (`confirmationToken` argument) |
 | `resume_migration` / `cancel_migration` | Continue / stop at a note boundary |
 | `migration_status` / `verify_migration` / `get_report` | Progress, verification, report |
 
@@ -256,6 +264,7 @@ If 60%+ of a folder's direct notes share 3 or more frontmatter keys, o2n **sugge
 - Hardened against ReDoS from malicious vaults
 - No network traffic other than the Notion API (no telemetry). npm packages are published via Trusted Publishing (OIDC) **with provenance**
 - The [privacy policy](PRIVACY.md) lists what o2n reads, sends and stores, and how to delete it
+- If you find a vulnerability, please report it privately as described in [SECURITY.md](SECURITY.md) (GitHub security advisory), not in a public issue
 
 <details>
 <summary><b>How <code>o2n login</code> (OAuth) works and its trust model</b></summary>
