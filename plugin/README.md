@@ -18,6 +18,13 @@ The plugin starts a local MCP server on your computer, because it has to read yo
 
 The MCP server needs Node.js 20 or later, because it is started with `npx`. The `o2n-cli` commands used for the Cowork setup below need Node.js 22.13 or later.
 
+## Installing
+
+The [o2n repository](https://github.com/TK-WFL/o2n) is also a plugin marketplace, so you add it by its GitHub name, `TK-WFL/o2n`.
+
+- **Claude Code**: run `/plugin marketplace add TK-WFL/o2n`, then `/plugin install o2n@o2n`.
+- **Cowork**: add `TK-WFL/o2n` as a marketplace where you add plugins, then install o2n from it. Then follow "Using it in Cowork" below.
+
 ## Settings
 
 | Setting | What it does |

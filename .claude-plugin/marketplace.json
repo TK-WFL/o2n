@@ -1,0 +1,20 @@
+{
+  "name": "o2n",
+  "owner": {
+    "name": "TK-WFL",
+    "url": "https://github.com/TK-WFL"
+  },
+  "metadata": {
+    "description": "Obsidian の vault を Notion へ移行する o2n のプラグイン"
+  },
+  "plugins": [
+    {
+      "name": "o2n",
+      "source": "./plugin",
+      "description": "Migrate an Obsidian vault into Notion from a conversation: keeps folders, wikilinks, frontmatter, Dataview fields and attachments, with a dry run first and resumable runs.",
+      "homepage": "https://github.com/TK-WFL/o2n#readme",
+      "repository": "https://github.com/TK-WFL/o2n",
+      "license": "MIT"
+    }
+  ]
+}
