@@ -1,5 +1,8 @@
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildReport, diffRun, renderReportMarkdown } from '../report.js';
+import { buildReport, diffRun, renderReportMarkdown, reportPath, writeReport } from '../report.js';
 import type { StateFile } from '../types.js';
 
 const state: StateFile = {
@@ -38,5 +41,21 @@ describe('report（#118）', () => {
     const md = renderReportMarkdown(buildReport(state, []), state);
     expect(md).not.toContain('今回の実行');
     expect(md).toContain('- 成功: 2件');
+  });
+
+  it('dry-run のレポートは report.dry-run.md に書き、本番の report.md を上書きしない（#191）', async () => {
+    const vault = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-report-')));
+    try {
+      await writeReport(vault, buildReport(state, [], { startedAt: 0, finishedAt: 1_000, apiCalls: 1, dryRun: false, before: {} }), state);
+      const production = await fs.readFile(reportPath(vault), 'utf8');
+
+      await writeReport(vault, buildReport(state, [], { startedAt: 0, finishedAt: 2_000, apiCalls: 2, dryRun: true, before: {} }), state, true);
+
+      expect(await fs.readFile(reportPath(vault), 'utf8')).toBe(production);
+      expect(path.basename(reportPath(vault, true))).toBe('report.dry-run.md');
+      expect(await fs.readFile(reportPath(vault, true), 'utf8')).not.toBe(production);
+    } finally {
+      await fs.rm(vault, { recursive: true, force: true });
+    }
   });
 });
