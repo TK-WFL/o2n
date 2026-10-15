@@ -77,6 +77,7 @@ describe('並列移行（#144）', () => {
     expect(stats.peak).toBeGreaterThan(1);
   });
 
+  // 遅延つきのモックで全ノートを並列と逐次の 2 回流すため、遅い CI ランナーでは既定の 5 秒を超えることがある
   it('逐次（既定）と並列で state の結果が同じ', async () => {
     const run = async (concurrency?: number) => {
       const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-par-cmp-')));
@@ -89,7 +90,7 @@ describe('並列移行（#144）', () => {
       return summary;
     };
     expect(await run(4)).toEqual(await run());
-  });
+  }, 30_000);
 
   it('ブロック上限では並列でも中断し、以降のノートを処理しない', async () => {
     const mock = createMockServer();
