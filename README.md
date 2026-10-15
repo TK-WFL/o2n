@@ -10,7 +10,7 @@
 [![npm](https://img.shields.io/npm/v/@tk_wfl/o2n-mcp-server?label=o2n-mcp-server&color=cb3837&logo=npm)](https://www.npmjs.com/package/@tk_wfl/o2n-mcp-server)
 [![CI](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml/badge.svg)](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)
+![Node](https://img.shields.io/badge/node-%3E%3D22.12-339933?logo=node.js&logoColor=white)
 
 [English](README.en.md) | 日本語
 
@@ -38,6 +38,10 @@ Notion の標準インポートは Obsidian 特有の書き方を解釈しない
 
 ## 🚀 3 分で始める
 
+**必要なもの**: Node.js 22.12 以上・Notion のトークン・Obsidian の vault（プラグイン・MCP サーバーから使う場合は `.obsidian` フォルダのある vault に限ります）
+
+以下の手順は `npx` で実行します。`npm i -g @tk_wfl/o2n-cli` でインストールすると、`npx @tk_wfl/o2n-cli` の代わりに `o2n` と打つだけで使えます（このページの `o2n …` はこの意味です）。
+
 ### 1. Notion のトークンを用意する
 
 [Notion 開発者ポータル → Personal access tokens](https://www.notion.so/developers/tokens) で **New token** → 名前・有効期限を選んで作成し、表示されたトークンを控えます（作成時にしか表示されません）。
@@ -55,6 +59,8 @@ npx @tk_wfl/o2n-cli login --token
 ```bash
 npx @tk_wfl/o2n-cli plan <vaultのパス> --parent <移行先 Notion ページの ID>
 ```
+
+移行先ページの ID は、Notion でそのページの「リンクをコピー」をしたときの URL の末尾にある 32 桁の英数字です。
 
 フォルダごとに「ページ階層」か「データベース」かを対話で選べます（frontmatter が揃っているフォルダは自動でデータベース化を提案）。
 
@@ -77,12 +83,14 @@ npx @tk_wfl/o2n-cli verify  <vaultのパス> --deep      # Notion の実ペー�
 | コマンド | 役割 | 主なオプション |
 |---|---|---|
 | `scan <vault>` | vault を走査して件数・推定ブロック数を表示（Notion にはアクセスしない） | `--verbose` `--json` |
-| `plan <vault>` | 移行計画（`.o2n/plan.json`）を対話で作成 | `--parent <id>` `--yes` `--embed-mode inline` `--link-style link` `--out <path>` |
-| `migrate <vault>` | 計画に従って移行 | `--dry-run` `--plan <path>` `--quiet` `--verbose` |
-| `resume <vault>` | 中断・失敗した移行を続きから再開（冪等） | `--quiet` |
+| `plan <vault>` | 移行計画（`.o2n/plan.json`）を対話で作成 | `--parent <id>` `--yes` `--embed-mode inline` `--link-style link` `--no-inline-fields` `--out <path>` |
+| `migrate <vault>` | 計画に従って移行 | `--dry-run` `--plan <path>` `--parent <id>` `--quiet` `--verbose` |
+| `resume <vault>` | 中断・失敗した移行を続きから再開（冪等） | `--quiet` `--verbose` |
 | `verify <vault>` | state と vault の突き合わせ。`--deep` で Notion の実ページとも照合 | `--deep` `--json` |
 | `report <vault>` | 最新のレポート（`.o2n/report.md`）を表示 | |
 | `login --token` | Notion のトークンを保存（入力は表示されない） | |
+| `logout` | 保存したトークンを削除し、Notion との連携を解除 | |
+| `whoami` | 連携中の Notion ワークスペースを表示 | |
 | `mcp allow <vault>` / `mcp disallow <vault>` | MCP サーバー（プラグイン）が読んでよい vault を保存・取り消し | |
 | `mcp write on` / `mcp write off` | MCP サーバーからの Notion への書き込みと確認フレーズを保存・解除 | |
 | `mcp status` | 保存された MCP の設定と、実際に使われる設定を表示 | |
@@ -155,7 +163,7 @@ claude --plugin-dir ./o2n/plugin
 |---|---|
 | Allowed vault paths | 読んでよい vault の絶対パス（カンマ区切り）。これ以外は拒否 |
 | Notion token | 個人アクセストークン推奨。OS の安全な保管場所に入る。空なら `o2n login --token` で保存したものを使う |
-| Allow writing to Notion | 既定オフ。オフの間は走査・計画・dry-run のみ |
+| Allow writing to Notion | 既定オフ。オフの間は走査・計画の確認・dry-run のみ。計画の変更と本実行には、書き込み許可と確認フレーズが必要 |
 | Confirmation phrase | 16 文字以上。本実行はこの文字列を Claude が渡したときだけ始まる |
 | Notion requests per second | 1〜10（既定 2） |
 
@@ -193,9 +201,9 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 | ツール | 役割 |
 |---|---|
 | `scan_vault` | vault を走査（読み取りのみ） |
-| `get_plan` / `update_plan` | 計画の確認・調整（`parentPageId` / `folders` / `skipList` / `embedMode` / `linkStyle` / `inlineFields`） |
+| `get_plan` / `update_plan` | 計画の確認・調整（`parentPageId` / `folders` / `skipList` / `embedMode` / `linkStyle` / `inlineFields`）。調整には書き込み許可と確認フレーズが必要 |
 | `prepare_migration` | 移行内容（対象・移行先・件数）を固定して `requestId` を返す |
-| `commit_migration` | 固定した内容を実行。本実行には確認トークンが必須 |
+| `commit_migration` | 固定した内容を実行。本実行には確認フレーズ（引数 `confirmationToken`）が必須 |
 | `resume_migration` / `cancel_migration` | 続きから再開 / ノート境界で中断 |
 | `migration_status` / `verify_migration` / `get_report` | 進捗・検証・レポート |
 
@@ -257,6 +265,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 - 悪意のある vault で処理をハングさせる ReDoS への対策済み
 - Notion API 以外への通信なし（テレメトリなし）。npm パッケージは Trusted Publishing（OIDC）で **provenance 付き**で公開
 - 何を読み・送り・保存するか、その消し方は [プライバシーポリシー](PRIVACY.md) にまとめています
+- 脆弱性を見つけた場合は、公開の Issue ではなく [SECURITY.md](SECURITY.md) の手順（非公開の Security Advisory）で報告してください
 
 <details>
 <summary><b><code>o2n login</code>（OAuth 連携）の仕組みと信頼モデル</b></summary>
