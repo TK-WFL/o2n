@@ -88,4 +88,16 @@ describe('Claude plugin manifest (#165)', () => {
     expect(readme).toContain(url);
     await expect(fs.access(path.join(repoRoot, 'PRIVACY.md'))).resolves.toBeUndefined();
   });
+
+  it('マーケットプレイス（.claude-plugin/marketplace.json）が plugin/ の o2n を指している（#192）', async () => {
+    const marketplace = await readJson<{ name: string; plugins: { name: string; source: string; description?: string }[] }>(
+      path.join(repoRoot, '.claude-plugin', 'marketplace.json'),
+    );
+    const manifest = await readJson<PluginManifest & { description: string }>(path.join(pluginRoot, '.claude-plugin', 'plugin.json'));
+    expect(marketplace.plugins).toHaveLength(1);
+    const [entry] = marketplace.plugins;
+    expect(entry.name).toBe(manifest.name);
+    expect(path.resolve(repoRoot, entry.source)).toBe(pluginRoot);
+    expect(entry.description).toBe(manifest.description);
+  });
 });

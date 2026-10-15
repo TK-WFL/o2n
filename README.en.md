@@ -149,14 +149,25 @@ Disabled by default because the old OAuth polling flow allowed token theft. Only
 
 ## 🤖 Using as an MCP server
 
-### As a Claude plugin (Claude Code)
+### As a Claude plugin (Claude Code / Cowork)
 
-[`plugin/`](plugin/) is a Claude plugin. It carries the MCP server launch settings, and you enter the token and other values in the settings dialog shown when you enable it.
+[`plugin/`](plugin/) is a Claude plugin. It carries the MCP server launch settings, and you enter the token and other values in the settings dialog shown when you enable it. This repository is also a plugin marketplace, so you can add it by its GitHub name, `TK-WFL/o2n`.
+
+In **Claude Code**, run:
+
+```text
+/plugin marketplace add TK-WFL/o2n
+/plugin install o2n@o2n
+```
+
+To try local changes, load a cloned folder directly:
 
 ```bash
 git clone https://github.com/TK-WFL/o2n.git
 claude --plugin-dir ./o2n/plugin
 ```
+
+In **Cowork**, add `TK-WFL/o2n` as a marketplace where you add plugins, then install o2n from it. After that, save the settings as described under "In Cowork" below.
 
 | Setting | What it does |
 |---|---|

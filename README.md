@@ -150,14 +150,25 @@ npx @tk_wfl/o2n-cli login
 
 ## 🤖 MCP サーバーとして使う
 
-### Claude のプラグインとして使う（Claude Code）
+### Claude のプラグインとして使う（Claude Code / Cowork）
 
-[`plugin/`](plugin/) は Claude のプラグインです。MCP サーバーの起動設定が入っており、トークンなどは有効化したときに表示される設定画面で入力します。
+[`plugin/`](plugin/) は Claude のプラグインです。MCP サーバーの起動設定が入っており、トークンなどは有効化したときに表示される設定画面で入力します。このリポジトリはプラグインのマーケットプレイスにもなっているので、GitHub のリポジトリ名 `TK-WFL/o2n` を指定して追加できます。
+
+**Claude Code** では次を実行します。
+
+```text
+/plugin marketplace add TK-WFL/o2n
+/plugin install o2n@o2n
+```
+
+手元で変更を試すときは、clone したフォルダを直接読み込めます。
 
 ```bash
 git clone https://github.com/TK-WFL/o2n.git
 claude --plugin-dir ./o2n/plugin
 ```
+
+**Cowork** では、プラグインの追加画面でマーケットプレイスとして `TK-WFL/o2n` を追加し、表示される o2n をインストールします。そのあと、下の「Cowork で使う場合」の設定を保存します。
 
 | 設定 | 内容 |
 |---|---|
