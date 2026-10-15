@@ -10,7 +10,7 @@
 [![npm](https://img.shields.io/npm/v/@tk_wfl/o2n-mcp-server?label=o2n-mcp-server&color=cb3837&logo=npm)](https://www.npmjs.com/package/@tk_wfl/o2n-mcp-server)
 [![CI](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml/badge.svg)](https://github.com/TK-WFL/o2n/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Node](https://img.shields.io/badge/node-%3E%3D22.12-339933?logo=node.js&logoColor=white)
+![Node](https://img.shields.io/badge/node-%3E%3D22.13-339933?logo=node.js&logoColor=white)
 
 [English](README.en.md) | 日本語
 
@@ -38,7 +38,7 @@ Notion の標準インポートは Obsidian 特有の書き方を解釈しない
 
 ## 🚀 3 分で始める
 
-**必要なもの**: Node.js 22.12 以上・Notion のトークン・Obsidian の vault（プラグイン・MCP サーバーから使う場合は `.obsidian` フォルダのある vault に限ります）
+**必要なもの**: Node.js 22.13 以上・Notion のトークン・Obsidian の vault（プラグイン・MCP サーバーから使う場合は `.obsidian` フォルダのある vault に限ります）
 
 以下の手順は `npx` で実行します。`npm i -g @tk_wfl/o2n-cli` でインストールすると、`npx @tk_wfl/o2n-cli` の代わりに `o2n` と打つだけで使えます（このページの `o2n …` はこの意味です）。
 

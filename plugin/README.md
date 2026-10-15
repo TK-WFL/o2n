@@ -16,7 +16,7 @@ The plugin starts a local MCP server on your computer, because it has to read yo
 | Cowork on your computer | Yes, after a one-time setup in a terminal. Cowork does not show the settings dialog, so save the settings with the commands under "Using it in Cowork". |
 | Chat on claude.ai, desktop and mobile | No. Chat does not start local MCP servers. |
 
-The MCP server needs Node.js 20 or later, because it is started with `npx`. The `o2n-cli` commands used for the Cowork setup below need Node.js 22.12 or later.
+The MCP server needs Node.js 20 or later, because it is started with `npx`. The `o2n-cli` commands used for the Cowork setup below need Node.js 22.13 or later.
 
 ## Settings
 

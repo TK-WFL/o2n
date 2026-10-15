@@ -14,7 +14,7 @@ npx @tk_wfl/o2n-cli scan <vaultPath>
 npm install -g @tk_wfl/o2n-cli
 ```
 
-Requires Node.js 22.12+.
+Requires Node.js 22.13+.
 
 ## Connect to Notion
 
