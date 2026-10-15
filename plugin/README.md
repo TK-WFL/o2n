@@ -16,7 +16,7 @@ The plugin starts a local MCP server on your computer, because it has to read yo
 | Cowork on your computer | Yes, after a one-time setup in a terminal. Cowork does not show the settings dialog, so save the settings with the commands under "Using it in Cowork". |
 | Chat on claude.ai, desktop and mobile | No. Chat does not start local MCP servers. |
 
-It needs Node.js 20 or later, because the server is started with `npx`.
+The MCP server needs Node.js 20 or later, because it is started with `npx`. The `o2n-cli` commands used for the Cowork setup below need Node.js 22.12 or later.
 
 ## Settings
 
@@ -24,7 +24,7 @@ It needs Node.js 20 or later, because the server is started with `npx`.
 |---|---|
 | Allowed vault paths | Absolute paths of the vaults o2n may read, separated by commas. Every other folder is refused. |
 | Notion token | A Notion personal access token, which is recommended, or an internal integration token. It is stored in your system's secure credential store. Leave it empty to use a token you saved with `npx @tk_wfl/o2n-cli login --token`. |
-| Allow writing to Notion | Off by default. While it is off, o2n only scans, plans and runs dry runs. |
+| Allow writing to Notion | Off by default. While it is off, o2n only scans, shows the plan and runs dry runs. Changing the plan and real migrations need writing allowed and the confirmation phrase. |
 | Confirmation phrase | At least 16 characters. A real migration starts only when Claude passes this exact phrase, so say it in chat only when you want the migration to run. |
 | Notion requests per second | 1 to 10, default 2. Keep 2 or 3 on Notion Free and Plus. |
 
@@ -54,7 +54,7 @@ npx @tk_wfl/o2n-cli mcp write on
 Ask Claude something like "Scan my vault at /Users/me/Notes and plan a migration to this Notion page", and give it the page URL. Claude then works through the steps below.
 
 1. It scans the vault and shows the folders, notes and attachments it found.
-2. It proposes a plan, for example which folders become databases, and you can change it.
+2. It proposes a plan, for example which folders become databases. To change the plan, writing must be allowed and Claude needs your confirmation phrase.
 3. It runs a dry run and reports what would be created.
 4. With writing allowed and your confirmation phrase, it runs the real migration and reports progress.
 5. It checks the result against Notion and writes a report into the vault.
