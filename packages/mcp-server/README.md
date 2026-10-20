@@ -15,7 +15,7 @@ Register `@tk_wfl/o2n-mcp-server` as a stdio MCP server:
 npx -y @tk_wfl/o2n-mcp-server
 ```
 
-Requires Node.js 20+, and `NOTION_TOKEN` in the environment the MCP server runs in, or a token
+Requires Node.js 22+, and `NOTION_TOKEN` in the environment the MCP server runs in, or a token
 saved with `npx @tk_wfl/o2n-cli login --token` (an empty `NOTION_TOKEN` falls back to the saved one). The simplest token is a Notion **personal access token**
 (developer portal → Personal access tokens → New token); it needs no per-page connect step.
 
