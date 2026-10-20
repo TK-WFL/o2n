@@ -38,7 +38,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@tk_wfl/o2n-core": "^0.7.3",
-    "zod": "^4.6.2"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "typescript": "^7.0.2"
