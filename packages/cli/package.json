@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@tk_wfl/o2n-core": "^0.7.3",
-    "@inquirer/prompts": "^8.7.3",
+    "@inquirer/prompts": "^8.7.4",
     "commander": "^15.0.0"
   },
   "devDependencies": {
