@@ -24,6 +24,6 @@
     "node": ">=22.13"
   },
   "overrides": {
-    "@hono/node-server": "^2.0.5"
+    "@hono/node-server": "^2.1.3"
   }
 }
