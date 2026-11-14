@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
-import { buildAliasIndex, buildNameIndex, resolveNoteLink, scanVault } from '../scanner.js';
+import { buildAliasIndex, buildNameIndex, exceedsNodeBudget, resolveNoteLink, scanVault } from '../scanner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VAULT = path.resolve(__dirname, '../../../../fixtures/test-vault');
@@ -161,6 +161,67 @@ describe('wikilink抽出のReDoS耐性（セキュリティ回帰テスト）', 
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('細工したノートへの耐性（#249）', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-hostile-scan-'));
+    await fs.writeFile(path.join(dir, 'Normal.md'), '# Normal\n');
+  });
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('![a]( や [a]( を閉じずに繰り返したノートでも短時間で scan を終える', async () => {
+    // scanner.ts は converter.ts の MD_IMAGE_RE / MD_LINK_RE を添付の列挙に使う
+    await fs.writeFile(path.join(dir, 'img.md'), '![a]('.repeat(50_000));
+    await fs.writeFile(path.join(dir, 'link.md'), '[a]('.repeat(50_000));
+    const started = Date.now();
+    const inv = await scanVault(dir);
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(inv.notes).toHaveLength(3);
+  });
+
+  it('エイリアスを何段も重ねた frontmatter のノートは、展開せずにスキップする', async () => {
+    let yaml = 'a0: &a0 [x, x]\n';
+    for (let i = 1; i <= 40; i += 1) yaml += `a${i}: &a${i} [*a${i - 1}, *a${i - 1}]\n`;
+    await fs.writeFile(path.join(dir, 'Bomb.md'), `---\n${yaml}---\n# Bomb\n`);
+    const started = Date.now();
+    const inv = await scanVault(dir);
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(inv.notes.map((n) => n.path)).toEqual(['Normal.md']);
+    expect(inv.skipped).toEqual([{ path: 'Bomb.md', reason: expect.stringContaining('要素数が上限') }]);
+  });
+
+  it.each([
+    ['マップ', 'a: &a\n  b: *a\n'],
+    ['配列', 'a: &a [1, *a]\n'],
+  ])('循環するエイリアス（%s）のノートもスキップする', async (_label, yaml) => {
+    await fs.writeFile(path.join(dir, 'Loop.md'), `---\n${yaml}---\n# Loop\n`);
+    const inv = await scanVault(dir);
+    expect(inv.notes.map((n) => n.path)).toEqual(['Normal.md']);
+    expect(inv.skipped).toEqual([{ path: 'Loop.md', reason: expect.stringContaining('要素数が上限') }]);
+  });
+
+  it('普通の大きさのエイリアスや大きめの配列は今までどおり読める', async () => {
+    const tags = Array.from({ length: 2_000 }, (_, i) => `t${i}`).join(', ');
+    await fs.writeFile(path.join(dir, 'Alias.md'), `---\nbase: &base [a, b]\ncopy: *base\ntags: [${tags}]\n---\n# Alias\n`);
+    const inv = await scanVault(dir);
+    const note = inv.notes.find((n) => n.path === 'Alias.md');
+    expect(note?.frontmatter).toMatchObject({ base: ['a', 'b'], copy: ['a', 'b'] });
+    expect((note?.frontmatter.tags as string[]).length).toBe(2_000);
+    expect(inv.skipped).toEqual([]);
+  });
+
+  it('exceedsNodeBudget は参照をたどるたびに数え、上限ちょうどは通す', () => {
+    const leaf = [1, 2, 3]; // 配列1 + 値3 = 4 要素
+    expect(exceedsNodeBudget(leaf, 4)).toBe(false);
+    expect(exceedsNodeBudget(leaf, 3)).toBe(true);
+    expect(exceedsNodeBudget({ a: leaf, b: leaf }, 9)).toBe(false); // オブジェクト1 + 4 + 4
+    expect(exceedsNodeBudget({ a: leaf, b: leaf }, 8)).toBe(true);
+    expect(exceedsNodeBudget({ d: new Date(0), s: 'x', n: null }, 4)).toBe(false);
   });
 });
 

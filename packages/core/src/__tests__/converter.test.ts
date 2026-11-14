@@ -351,6 +351,62 @@ describe('インラインコード/タスク正規化のReDoS耐性（#79）', (
   });
 });
 
+describe('閉じないリンク先・空行の大量反復への耐性（#249）', () => {
+  it('![a]( や [a]( を閉じずに繰り返しても、空行が数万行続いても短時間で終える', () => {
+    // 修正前は 4 万反復で画像 18 秒・リンク 3 秒、CRLF の空行 4 万行で 6 秒かかっていた（二次オーダー）
+    const inputs = [
+      '![a]('.repeat(50_000),
+      '[a]('.repeat(50_000),
+      '![a]((x)'.repeat(50_000),
+      '[a](x(y'.repeat(50_000),
+      '![a](' + '(x)'.repeat(50_000),
+      '\n'.repeat(50_000),
+      '\r\n'.repeat(50_000),
+      ' \n'.repeat(50_000),
+      '- \n'.repeat(50_000),
+    ];
+    for (const evil of inputs) {
+      const started = Date.now();
+      convertNote(evil, ctx());
+      expect(Date.now() - started).toBeLessThan(1_000);
+    }
+  });
+
+  it('括弧入りのパス img(1).png は1つのリンク先として解決される', () => {
+    const seen: string[] = [];
+    const resolveAttachment = (target: string) => {
+      seen.push(target);
+      return target === 'img(1).png' ? 'img(1).png' : null;
+    };
+    const r = convertNote('![図](img(1).png) と [資料](doc(final).pdf "題")', ctx({ resolveAttachment }));
+    expect(r.pendingFiles.map((f) => f.targetPath)).toEqual(['img(1).png']);
+    expect(seen).toContain('doc(final).pdf');
+    expect(r.markdown).toContain('[資料](doc(final).pdf "題")');
+  });
+
+  it('外部 URL の括弧と、閉じ括弧の直後の文は今までどおり', () => {
+    const r = convertNote('[W](https://en.wikipedia.org/wiki/Foo_(bar)) と (![a](x.png)) です', ctx());
+    expect(r.markdown).toBe('[W](https://en.wikipedia.org/wiki/Foo_(bar)) と (⟦o2n-file-0⟧) です');
+  });
+
+  it('% エスケープとして読めないリンク先（100%.pdf）でも例外にならない', () => {
+    const resolveAttachment = (target: string) => (target === '100%.pdf' ? 'files/100%.pdf' : null);
+    const r = convertNote('[達成率](100%.pdf) と [メモ](a%zz.md)', ctx({ resolveAttachment, resolveNoteLink: () => null }));
+    expect(r.pendingFiles.map((f) => f.targetPath)).toEqual(['files/100%.pdf']);
+    expect(r.entries.some((e) => e.category === 'unresolved_link' && e.message.includes('a%zz.md'))).toBe(true);
+  });
+
+  it('タスクの拡張状態の正規化はインデント・番号付き・空行の後でも今までどおり', () => {
+    const r = convertNote('\n\n- [/] a\n  - [X] b\n\t1. [-] c\n', ctx());
+    expect(r.markdown).toBe('\n\n- [ ] (/) a\n  - [x] b\n\t1. [ ] (-) c\n');
+  });
+
+  it('記号だけの行の次の行にある [>] はタスクとして扱わない（記号と同じ行だけが対象）', () => {
+    const r = convertNote('-\n[>] d\n', ctx());
+    expect(r.markdown).toBe('-\n[>] d\n');
+  });
+});
+
 describe('複数パイプ許容後の ReDoS 耐性（#103）', () => {
   it('パイプの大量反復でも短時間で終える', () => {
     for (const evil of ['[[a' + '|'.repeat(50_000), '![[a.png' + '|x'.repeat(30_000), '[[' + 'a|'.repeat(30_000) + ']']) {

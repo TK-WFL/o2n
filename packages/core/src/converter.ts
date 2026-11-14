@@ -200,10 +200,13 @@ function protectInlineCode(text: string): { text: string; restore: (t: string) =
  */
 function normalizeTaskStates(text: string, entries: ReportEntry[], sourcePath: string): string {
   let count = 0;
-  const out = text.replace(/^(\s*(?:[-*+]|\d+[.)])\s+)\[([^\s\]xX])\](?=\s)/gm, (_m, prefix: string, mark: string) => {
+  // ReDoS対策（#249）: インデントと記号の後ろは改行を含まない空白（`[^\S\r\n]`）に限る。`\s` だと
+  // 複数行モードの `^` ごとに後続の空行を末尾まで読んでから失敗するため、空行が数万行続くノートで
+  // 二次オーダーの時間がかかっていた。タスクの記号は記号と同じ行にあるものだけが対象なので解釈は変わらない
+  const out = text.replace(/^([^\S\r\n]*(?:[-*+]|\d+[.)])[^\S\r\n]+)\[([^\s\]xX])\](?=\s)/gm, (_m, prefix: string, mark: string) => {
     count += 1;
     return `${prefix}[ ] (${mark})`;
-  }).replace(/^(\s*(?:[-*+]|\d+[.)])\s+)\[X\](?=\s)/gm, '$1[x]');
+  }).replace(/^([^\S\r\n]*(?:[-*+]|\d+[.)])[^\S\r\n]+)\[X\](?=\s)/gm, '$1[x]');
   if (count > 0) {
     entries.push({
       category: 'downgraded',
@@ -718,7 +721,10 @@ function convertWikiLinks(text: string, ctx: ConverterContext, acc: ConversionAc
 // 50,000反復で2〜3秒かかっていた。Markdownの入れ子リンクは元々不正な記法のため解釈は変わらない。
 // リンク先は CommonMark の `<スペース入り パス>` 形式と、末尾の `"タイトル"` も受け付ける（#141）。
 // 各選択肢の文字集合が排他（`<…>` は `>` を含まない、裸のパスは空白と `)` を含まない）でバックトラックしない
-const MD_DEST = String.raw`\((?:<([^<>\n]+)>|([^)\s<]+))(?:[ \t]+"[^"\n]*")?\)`;
+// 裸のパスは `(` も文字としては受け付けず、対応の取れた1段の括弧 `(…)` だけを通す（#249）。`(` を
+// 文字として読むと、`![a](` を閉じずに繰り返したノートで開始位置ごとに末尾まで読んでから失敗し、
+// 二次オーダーの時間がかかっていた。`img(1).png` のような括弧入りのパスは1つのリンク先として読める
+const MD_DEST = String.raw`\((?:<([^<>\n]+)>|((?:[^()\s<]|\([^()\s<]*\))+))(?:[ \t]+"[^"\n]*")?\)`;
 export const MD_IMAGE_RE = new RegExp(String.raw`!\[([^[\]]*)\]` + MD_DEST, 'g');
 export const MD_LINK_RE = new RegExp(String.raw`\[([^[\]]+)\]` + MD_DEST, 'g');
 
@@ -765,7 +771,8 @@ function convertMarkdownLinksAndImages(
     // `note.md#見出し` の見出し部分は Notion のページ先頭リンクに降格する（wikilink の見出しリンクと同じ扱い、#109）
     const hashIdx = url.indexOf('#');
     const pathPart = hashIdx === -1 ? url : url.slice(0, hashIdx);
-    const decoded = decodeURIComponent(pathPart);
+    // `100%.pdf` のように % エスケープとして読めないリンク先はそのまま使う（例外にすると移行全体が止まる、#249）
+    const decoded = safeDecode(pathPart);
     const ext = extensionOf(decoded);
 
     if (isFileExtension(ext)) {

@@ -36,6 +36,31 @@ export class UnsupportedFrontmatterLanguageError extends Error {
   }
 }
 
+/**
+ * frontmatter を展開したときの要素数（オブジェクト・配列・値の合計）の上限（#249）。YAML のエイリアスは
+ * 同じオブジェクトへの参照として読み込まれるので、`b: [*a, *a]` を何段も重ねた数百バイトの frontmatter が、
+ * プロパティや callout に書き出すときに数 GB に膨らむ。循環する参照（`a: &a [*a]`）は書き出しが終わらない。
+ * 普通の frontmatter は多くても数百要素なので、この上限に当たるのは細工されたノートだけ
+ */
+export const MAX_FRONTMATTER_NODES = 50_000;
+
+/** 値を展開したときの要素数が上限を超えるか。参照をたどるたびに数え、上限を超えた時点で打ち切る */
+export function exceedsNodeBudget(value: unknown, budget: number = MAX_FRONTMATTER_NODES): boolean {
+  let count = 0;
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const v = stack.pop();
+    count += 1;
+    if (count > budget) return true;
+    if (Array.isArray(v)) {
+      for (const child of v) stack.push(child);
+    } else if (v !== null && typeof v === 'object' && !(v instanceof Date)) {
+      for (const child of Object.values(v)) stack.push(child);
+    }
+  }
+  return false;
+}
+
 function toPosix(p: string): string {
   return p.split(path.sep).join('/');
 }
@@ -339,6 +364,13 @@ export async function scanVault(vaultPath: string): Promise<VaultInventory> {
       continue;
     }
     const frontmatter = parsed.data ?? {};
+    if (exceedsNodeBudget(frontmatter)) {
+      skipped.push({
+        path: relPath,
+        reason: `frontmatter を展開すると要素数が上限（${MAX_FRONTMATTER_NODES.toLocaleString('en-US')}）を超えるため安全上スキップしました（YAML のエイリアス \`*name\` の多重参照や循環）`,
+      });
+      continue;
+    }
 
     let content = parsed.content;
     let excalidraw: NoteRecord['excalidraw'];
