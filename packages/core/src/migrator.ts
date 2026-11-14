@@ -6,7 +6,7 @@ import { NotionApiError, NotionBlockLimitError, type NotionApi, type NotionBlock
 import type { StateStore } from './state.js';
 import { contentHash, isNoteUpToDate, stableStringify } from './state.js';
 import { createDatabaseForFolder, buildRowProperties } from './notion-db.js';
-import { mimeTypeFor } from './attachments.js';
+import { extensionOf, IMAGE_EXTENSIONS, mimeTypeFor } from './attachments.js';
 import { noteFields } from './planner.js';
 import {
   buildTitleProperty,
@@ -138,6 +138,8 @@ interface ResolverIndexes {
   noteIndex: Map<string, string[]>;
   aliasIndex: Map<string, string[]>;
   fileIndex: Map<string, string[]>;
+  /** スキャナーが見つけた .md 以外のファイル（シンボリックリンクと隠しフォルダの中身は含まない） */
+  scannedFiles: Set<string>;
 }
 
 // 索引は inventory ごとに一度だけ作る（buildResolvers は各パスでノートごとに呼ばれる）
@@ -146,15 +148,14 @@ const resolverIndexCache = new WeakMap<VaultInventory, ResolverIndexes>();
 function indexesFor(inventory: VaultInventory): ResolverIndexes {
   let idx = resolverIndexCache.get(inventory);
   if (!idx) {
+    // 添付は vault 内の .md 以外の全ファイルから解決する（#157）。以前は scan 時に ![[…]] で見つかった
+    // 添付だけから作っていたため、Markdown 形式でしか参照されない画像・ファイルが解決できなかった
+    const files = inventory.files ?? inventory.attachments.map((a) => a.targetPath).filter((p): p is string => p !== null);
     idx = {
       noteIndex: buildNameIndex(inventory.notes.map((n) => n.path)),
       aliasIndex: buildAliasIndex(inventory.notes),
-      // 添付は vault 内の .md 以外の全ファイルから解決する（#157）。以前は scan 時に ![[…]] で見つかった
-      // 添付だけから作っていたため、Markdown 形式でしか参照されない画像・ファイルが解決できなかった
-      fileIndex: buildNameIndex(
-        inventory.files ??
-          inventory.attachments.map((a) => a.targetPath).filter((p): p is string => p !== null),
-      ),
+      fileIndex: buildNameIndex(files),
+      scannedFiles: new Set(files),
     };
     resolverIndexCache.set(inventory, idx);
   }
@@ -806,35 +807,28 @@ async function resolvePageDecoration(
 ): Promise<{ icon?: PageIcon; cover?: PageCover }> {
   const out: { icon?: PageIcon; cover?: PageCover } = {};
   const fm = note.frontmatter;
-  const { fileIndex } = indexesFor(inventory);
+  const { fileIndex, scannedFiles } = indexesFor(inventory);
 
   const asImage = async (raw: unknown, kind: 'icon' | 'cover'): Promise<PageIcon | PageCover | undefined> => {
     if (typeof raw !== 'string') return undefined;
     const value = raw.trim().replace(/^!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/, '$1');
     if (/^https?:\/\//i.test(value)) return { type: 'external', external: { url: value } };
-    // 本文から参照されていない画像は添付索引に無いので、vault ルート／ノートのフォルダからの相対パスも試す
+    // ファイル名での解決に加えて、vault ルート／ノートのフォルダからの相対パスも試す。
+    // どの候補も、スキャナーが見つけた画像ファイルに一致するものだけを使う（#248）。frontmatter の値を
+    // そのままパスにして開くと、スキャナーが外しているシンボリックリンクの先（vault の外）や
+    // 隠しフォルダ（.git 等）のファイル、画像以外のファイルまでアップロードできてしまう
     const candidates = [
       resolveByFilename(value, note.path, fileIndex).resolved,
-      value.replace(/^\/+/, ''),
-      path.posix.join(path.posix.dirname(note.path), value),
-    ].filter((c): c is string => typeof c === 'string' && c.length > 0 && !c.includes('..'));
-    let resolved: string | undefined;
-    for (const c of candidates) {
-      try {
-        const st = await fs.stat(path.join(vaultPath, c));
-        if (st.isFile()) {
-          resolved = c;
-          break;
-        }
-      } catch {
-        // 次の候補へ
-      }
-    }
+      path.posix.normalize(value.replace(/^\/+/, '')),
+      path.posix.normalize(path.posix.join(path.posix.dirname(note.path), value)),
+    ];
+    const resolved = candidates.find(
+      (c): c is string => typeof c === 'string' && scannedFiles.has(c) && IMAGE_EXTENSIONS.has(extensionOf(c)),
+    );
     if (!resolved) return undefined;
     try {
-      const absPath = path.join(vaultPath, resolved);
-      const stat = await fs.stat(absPath);
-      const id = await uploadFile(api, absPath, stat.size, false);
+      const target = await resolveUploadTarget(vaultPath, resolved);
+      const id = await uploadFile(api, target.absPath, target.size, false);
       return { type: 'file_upload', file_upload: { id } };
     } catch (err) {
       report.push({ category: 'warning', path: note.path, message: `${kind} 画像 "${value}" のアップロードに失敗: ${String(err)}` });
@@ -851,6 +845,25 @@ async function resolvePageDecoration(
   const cover = (await asImage(fm.cover, 'cover')) ?? (await asImage(fm.banner, 'cover'));
   if (cover && cover.type !== 'emoji') out.cover = cover;
   return out;
+}
+
+/**
+ * アップロードする vault 内ファイルの絶対パスとサイズを返す。対象がシンボリックリンクでない通常ファイルで、
+ * 実体が vault の中にあることを確かめる（#248）。スキャナーはシンボリックリンクを索引に入れないが、
+ * スキャン後に置き換えられた場合でも vault の外のファイルを Notion に送らないための最後の確認
+ */
+async function resolveUploadTarget(vaultPath: string, relPath: string): Promise<{ absPath: string; size: number }> {
+  const absPath = path.join(vaultPath, relPath);
+  const stat = await fs.lstat(absPath);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error('シンボリックリンクや通常ファイル以外はアップロードしません');
+  }
+  const [realVault, realFile] = await Promise.all([fs.realpath(vaultPath), fs.realpath(absPath)]);
+  const relative = path.relative(realVault, realFile);
+  if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error('vault の外にあるファイルはアップロードしません');
+  }
+  return { absPath, size: stat.size };
 }
 
 async function uploadFile(
@@ -1050,17 +1063,18 @@ async function runPass3(opts: MigratorOptions, report: ReportEntry[]): Promise<v
       let fileUploadId = existingFile?.fileUploadId;
 
       if (!fileUploadId || existingFile?.status === 'failed') {
-        const absPath = path.join(vaultPath, file.targetPath);
         try {
-          const stat = dryRun ? { size: 0 } : await fs.stat(absPath);
-          if (stat.size > wsLimit) {
+          const { absPath, size } = dryRun
+            ? { absPath: path.join(vaultPath, file.targetPath), size: 0 }
+            : await resolveUploadTarget(vaultPath, file.targetPath);
+          if (size > wsLimit) {
             await state.setFile(file.targetPath, { status: 'skipped', error: 'ワークスペースのファイルサイズ上限超過' });
             report.push({ category: 'oversized_file', path: file.targetPath, message: 'ワークスペースのファイルサイズ上限を超過したためスキップしました' });
             continue;
           }
           let inFlight = uploadsInFlight.get(file.targetPath);
           if (!inFlight) {
-            inFlight = uploadFile(api, absPath, stat.size, dryRun, opts.multipartPartSizeBytes);
+            inFlight = uploadFile(api, absPath, size, dryRun, opts.multipartPartSizeBytes);
             uploadsInFlight.set(file.targetPath, inFlight);
           }
           fileUploadId = await inFlight;
