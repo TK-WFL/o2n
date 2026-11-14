@@ -1,10 +1,10 @@
 name: Release Claude plugin
 
 # Anthropic のプラグインディレクトリは plugin-release ブランチを追従する（#165）。
-# plugin/ は npm に公開済みの @tk_wfl/o2n-mcp-server をロックファイルで固定しているので（#257）、
-# 公開 → scripts/pin-plugin.mjs のピン留め PR のマージ → このワークフロー、の順に進める。
-# ロックファイルから Claude Code と同じ条件（--ignore-scripts）で依存を入れ、サーバーが起動することを
-# 確かめてから、plugin-release を main のコミットへ早送りする。
+# 通常は Publish npm packages が公開後に進める。リリースを伴わずに plugin/ だけを変えたときは、
+# main にマージした後でこのワークフローを実行する（#259）。plugin/.mcp.json の npx が固定した
+# バージョンで MCP サーバーが起動することを確かめてから（npm にないバージョンなら失敗する）、
+# plugin-release を main のコミットへ早送りする。
 
 on:
   workflow_dispatch:
@@ -30,11 +30,6 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
-      - name: Install the plugin's locked packages the way Claude Code does
-        run: npm ci --ignore-scripts --no-fund
-        working-directory: plugin
-      - run: npm audit
-        working-directory: plugin
       - name: Start the plugin's MCP server
         run: node scripts/smoke-plugin-server.mjs
 
