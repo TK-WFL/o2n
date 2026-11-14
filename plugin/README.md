@@ -16,7 +16,7 @@ The plugin starts a local MCP server on your computer, because it has to read yo
 | Cowork on your computer | Yes, after a one-time setup in a terminal. Cowork does not show the settings dialog, so save the settings with the commands under "Using it in Cowork". |
 | Chat on claude.ai, desktop and mobile | No. Chat does not start local MCP servers. |
 
-The MCP server needs Node.js 22 or later and npm. When you install the plugin, Claude Code installs the server's npm packages from the plugin's `package-lock.json`, and then starts the server with `node`. The `o2n-cli` commands used for the Cowork setup below need Node.js 22.13 or later.
+The MCP server needs Node.js 22 or later, because it is started with `npx`. The `o2n-cli` commands used for the Cowork setup below need Node.js 22.13 or later.
 
 ## Installing
 
@@ -70,8 +70,7 @@ The tools are `scan_vault`, `get_plan`, `update_plan`, `prepare_migration`, `com
 
 ## What the plugin runs, reads, writes and sends
 
-- **Installs**: when you install or update the plugin, Claude Code installs `@tk_wfl/o2n-mcp-server` and its dependencies into the plugin folder from `package-lock.json`. The lockfile pins every package to an exact version from the npm registry with its integrity hash, and the install runs no package scripts. `@tk_wfl/o2n-mcp-server` is published from the public repository with npm provenance.
-- **Runs**: `node ${CLAUDE_PLUGIN_ROOT}/node_modules/@tk_wfl/o2n-mcp-server/dist/index.js`, the MCP server installed above. Nothing is downloaded when the server starts.
+- **Runs**: `npx -y @tk_wfl/o2n-mcp-server@0.8.0`, the exact version pinned in `.mcp.json`. npx downloads that package and its dependencies from the npm registry. The package is published from the public repository with npm provenance.
 - **Reads**:
   - Markdown notes and attachments inside the allowed vault paths.
   - `~/.o2n/credentials.json` when the Notion token setting is empty.

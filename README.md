@@ -161,11 +161,10 @@ npx @tk_wfl/o2n-cli login
 /plugin install o2n@o2n
 ```
 
-手元で変更を試すときは、clone したフォルダを直接読み込めます。直接読み込むときは Claude Code が依存を入れないので、先に `plugin/` でロックファイルどおりに入れます。
+手元で変更を試すときは、clone したフォルダを直接読み込めます。
 
 ```bash
 git clone https://github.com/TK-WFL/o2n.git
-(cd o2n/plugin && npm ci --ignore-scripts)
 claude --plugin-dir ./o2n/plugin
 ```
 
