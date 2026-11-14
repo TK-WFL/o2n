@@ -76,6 +76,90 @@ describe('frontmatter の icon / cover（#113）', () => {
   });
 });
 
+describe('icon / cover にできるのはスキャナーが見つけた画像だけ（#248）', () => {
+  let outside: string;
+  beforeEach(async () => {
+    outside = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'o2n-outside-')));
+    await fs.writeFile(path.join(outside, 'secret.png'), 'outside-the-vault');
+  });
+  afterEach(async () => {
+    await fs.rm(outside, { recursive: true, force: true });
+  });
+
+  const migrate = async () => {
+    const mock = createMockServer();
+    const { inventory, plan, api, state } = await setupMigration(tmpDir, mock.fetchImpl);
+    const report = await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+    const uploads = mock.calls.filter((c) => c.method === 'POST' && c.path === '/file_uploads');
+    const decorated = (name: string) =>
+      mock.calls.find((c) => c.method === 'PATCH' && c.path === `/pages/${state.getNote(name)!.pageId}`)?.body as { icon?: unknown; cover?: unknown } | undefined;
+    const created = (heading: string) =>
+      String((mock.calls.find((c) => c.method === 'POST' && c.path === '/pages' && String((c.body as { markdown?: string }).markdown).includes(`# ${heading}`))!.body as { markdown: string }).markdown);
+    return { mock, state, report, uploads, decorated, created };
+  };
+
+  it.skipIf(process.platform === 'win32')('vault の外を指すシンボリックリンク（ファイル・フォルダ）はアップロードしない', async () => {
+    await fs.symlink(path.join(outside, 'secret.png'), path.join(tmpDir, 'link.png'));
+    await fs.symlink(outside, path.join(tmpDir, 'linked-dir'));
+    await fs.writeFile(path.join(tmpDir, 'S1.md'), '---\ncover: link.png\n---\n# S1\n');
+    await fs.writeFile(path.join(tmpDir, 'S2.md'), '---\nicon: linked-dir/secret.png\n---\n# S2\n');
+    await fs.writeFile(path.join(tmpDir, 'S3.md'), '---\nbanner: "![[link.png]]"\n---\n# S3\n');
+    const { uploads, decorated, created } = await migrate();
+
+    expect(uploads).toHaveLength(0);
+    for (const name of ['S1.md', 'S2.md', 'S3.md']) expect(decorated(name)).toBeUndefined();
+    // 反映しなかった値はメタ callout に残る
+    expect(created('S1')).toContain('cover: link.png');
+    expect(created('S2')).toContain('icon: linked-dir/secret.png');
+  });
+
+  it('隠しフォルダの中のファイルと、画像以外のファイルはアップロードしない', async () => {
+    await fs.mkdir(path.join(tmpDir, '.git'));
+    await fs.writeFile(path.join(tmpDir, '.git', 'pic.png'), Buffer.from([1]));
+    await fs.mkdir(path.join(tmpDir, '.obsidian'));
+    await fs.writeFile(path.join(tmpDir, '.obsidian', 'workspace.json'), '{}');
+    await fs.writeFile(path.join(tmpDir, 'memo.txt'), 'plain text');
+    await fs.writeFile(path.join(tmpDir, 'H1.md'), '---\ncover: .git/pic.png\n---\n# H1\n');
+    await fs.writeFile(path.join(tmpDir, 'H2.md'), '---\nicon: .obsidian/workspace.json\n---\n# H2\n');
+    await fs.writeFile(path.join(tmpDir, 'H3.md'), '---\ncover: memo.txt\n---\n# H3\n');
+    await fs.writeFile(path.join(tmpDir, 'H4.md'), '---\ncover: ../outside.png\n---\n# H4\n');
+    const { uploads, decorated } = await migrate();
+
+    expect(uploads).toHaveLength(0);
+    for (const name of ['H1.md', 'H2.md', 'H3.md', 'H4.md']) expect(decorated(name)).toBeUndefined();
+  });
+
+  it('vault 内の画像は、ファイル名・ルートからのパス・ノートからの相対パスのどれでも使える', async () => {
+    await fs.mkdir(path.join(tmpDir, 'img'));
+    await fs.mkdir(path.join(tmpDir, 'notes', 'assets'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'img', 'root.png'), Buffer.from([1]));
+    await fs.writeFile(path.join(tmpDir, 'notes', 'assets', 'near.jpg'), Buffer.from([2]));
+    await fs.writeFile(path.join(tmpDir, 'P1.md'), '---\ncover: root.png\n---\n# P1\n');
+    await fs.writeFile(path.join(tmpDir, 'P2.md'), '---\ncover: /img/root.png\n---\n# P2\n');
+    await fs.writeFile(path.join(tmpDir, 'notes', 'P3.md'), '---\nicon: ./assets/near.jpg\n---\n# P3\n');
+    const { uploads, decorated } = await migrate();
+
+    expect(uploads.map((c) => (c.body as { filename: string }).filename).sort()).toEqual(['near.jpg', 'root.png', 'root.png']);
+    expect(decorated('P1.md')).toMatchObject({ cover: { type: 'file_upload' } });
+    expect(decorated('P2.md')).toMatchObject({ cover: { type: 'file_upload' } });
+    expect(decorated('notes/P3.md')).toMatchObject({ icon: { type: 'file_upload' } });
+  });
+
+  it.skipIf(process.platform === 'win32')('スキャン後にシンボリックリンクへ置き換えられた添付は送らず、警告を残す', async () => {
+    await fs.writeFile(path.join(tmpDir, 'pic.png'), Buffer.from([1]));
+    await fs.writeFile(path.join(tmpDir, 'T1.md'), '# T1\n\n![[pic.png]]\n');
+    const mock = createMockServer();
+    const { inventory, plan, api, state } = await setupMigration(tmpDir, mock.fetchImpl);
+    await fs.rm(path.join(tmpDir, 'pic.png'));
+    await fs.symlink(path.join(outside, 'secret.png'), path.join(tmpDir, 'pic.png'));
+    const report = await runMigration({ vaultPath: tmpDir, plan, inventory, api, state, dryRun: false });
+
+    expect(mock.calls.filter((c) => c.method === 'POST' && c.path === '/file_uploads')).toHaveLength(0);
+    expect(state.getFile('pic.png')).toMatchObject({ status: 'failed' });
+    expect(report.some((e) => e.category === 'warning' && e.path === 'pic.png' && e.message.includes('シンボリックリンク'))).toBe(true);
+  });
+});
+
 describe('変更判定の指紋（#136）', () => {
   it('frontmatter だけを変えたノートも resume で同じページが更新される', async () => {
     await fs.writeFile(path.join(tmpDir, 'F.md'), '---\nstatus: todo\n---\n# F\n');
