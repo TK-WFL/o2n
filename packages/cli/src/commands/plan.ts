@@ -10,6 +10,7 @@ import {
   suggestFolderModes,
   type FolderPlan,
 } from '@tk_wfl/o2n-core';
+import { safeLine } from '../terminal.js';
 
 export class PlanInputRequiredError extends Error {
   constructor(message: string) {
@@ -51,7 +52,7 @@ export async function planCommand(vaultPath: string, opts: PlanCommandOptions): 
 
   for (const folder of suggested) {
     if (folder.mode === 'database') {
-      console.log(`\nフォルダ "${folder.folderPath}" はDB化を提案されています: ${folder.suggestionReason}`);
+      console.log(`\nフォルダ "${safeLine(folder.folderPath)}" はDB化を提案されています: ${safeLine(folder.suggestionReason ?? '')}`);
       // 非対話環境で --yes が無い場合は提案を受け入れず page_tree のまま（確認なしに DB 化しない）
       const accept = opts.yes ? true : interactive ? await confirm({ message: 'databaseモードで移行しますか？', default: true }) : false;
       if (!opts.yes && !interactive) console.log('  非対話環境のため page_tree のままにします（--yes で自動承認）');
@@ -75,6 +76,6 @@ export async function planCommand(vaultPath: string, opts: PlanCommandOptions): 
   } else {
     await atomicWriteVaultStateFile(vaultPath, 'plan.json', serializedPlan);
   }
-  console.log(`\n計画を書き出しました: ${outPath}`);
+  console.log(`\n計画を書き出しました: ${safeLine(outPath)}`);
   return outPath;
 }

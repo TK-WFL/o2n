@@ -1,4 +1,5 @@
 import { blockLimitWarning, estimateBlockCount, scanVault } from '@tk_wfl/o2n-core';
+import { safeJson, safeLine } from '../terminal.js';
 
 export async function scanCommand(vaultPath: string, opts: { verbose?: boolean; json?: boolean }): Promise<void> {
   const inventory = await scanVault(vaultPath);
@@ -6,27 +7,23 @@ export async function scanCommand(vaultPath: string, opts: { verbose?: boolean; 
   if (opts.json) {
     const estimated = estimateBlockCount(inventory);
     console.log(
-      JSON.stringify(
-        {
-          vaultPath: inventory.vaultPath,
-          noteCount: inventory.notes.length,
-          attachmentCount: inventory.attachments.length,
-          wikiLinkCount: inventory.wikiLinks.length,
-          estimatedBlocks: estimated,
-          blockLimitWarning: blockLimitWarning(estimated),
-          folders: Object.fromEntries(Object.entries(inventory.folderTree).map(([k, v]) => [k || '(root)', v.length])),
-          frontmatterKeyStats: inventory.frontmatterKeyStats,
-          skipped: inventory.skipped,
-          warnings: inventory.warnings,
-        },
-        null,
-        2,
-      ),
+      safeJson({
+        vaultPath: inventory.vaultPath,
+        noteCount: inventory.notes.length,
+        attachmentCount: inventory.attachments.length,
+        wikiLinkCount: inventory.wikiLinks.length,
+        estimatedBlocks: estimated,
+        blockLimitWarning: blockLimitWarning(estimated),
+        folders: Object.fromEntries(Object.entries(inventory.folderTree).map(([k, v]) => [k || '(root)', v.length])),
+        frontmatterKeyStats: inventory.frontmatterKeyStats,
+        skipped: inventory.skipped,
+        warnings: inventory.warnings,
+      }),
     );
     return;
   }
 
-  console.log(`vault: ${inventory.vaultPath}`);
+  console.log(`vault: ${safeLine(inventory.vaultPath)}`);
   console.log(`ノート数: ${inventory.notes.length}`);
   console.log(`添付ファイル数: ${inventory.attachments.length}`);
   console.log(`wikilink数: ${inventory.wikiLinks.length}`);
@@ -39,23 +36,23 @@ export async function scanCommand(vaultPath: string, opts: { verbose?: boolean; 
 
   console.log('\nフォルダツリー:');
   for (const [folder, notes] of Object.entries(inventory.folderTree).sort()) {
-    console.log(`  ${folder || '(root)'}: ${notes.length}件`);
+    console.log(`  ${safeLine(folder) || '(root)'}: ${notes.length}件`);
   }
 
   console.log('\nfrontmatterキー出現回数:');
   for (const [key, count] of Object.entries(inventory.frontmatterKeyStats).sort((a, b) => b[1] - a[1])) {
-    console.log(`  ${key}: ${count}`);
+    console.log(`  ${safeLine(key)}: ${count}`);
   }
 
   if (opts.verbose) {
     if (inventory.skipped.length > 0) {
       console.log('\nスキップ予定ファイル:');
-      for (const s of inventory.skipped) console.log(`  - ${s.path}: ${s.reason}`);
+      for (const s of inventory.skipped) console.log(`  - ${safeLine(s.path)}: ${safeLine(s.reason)}`);
     }
     if (inventory.warnings.length > 0) {
       console.log('\n警告:');
       for (const w of inventory.warnings) {
-        console.log(`  - ${w.sourcePath}: "${w.linkText}" (${w.reason})`);
+        console.log(`  - ${safeLine(w.sourcePath)}: "${safeLine(w.linkText)}" (${safeLine(w.reason)})`);
       }
     }
   }

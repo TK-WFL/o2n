@@ -4,6 +4,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { saveCredentials, clearCredentials, loadCredentials } from '@tk_wfl/o2n-core';
 import { AUTH_PROXY_URL, NOTION_OAUTH_CLIENT_ID } from '../oauth-config.js';
+import { safeLine, safeText } from '../terminal.js';
 
 function openBrowser(url: string): void {
   // セキュリティ対策（外部レビュー指摘対応）: execにシェル文字列を組み立てて渡すと
@@ -67,11 +68,6 @@ const ENABLE_BROWSER_LOGIN_ENV = 'O2N_ENABLE_BROWSER_LOGIN';
 
 function sha256Hex(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
-}
-
-function sanitizeConsoleText(value: string | null | undefined): string | null {
-  if (!value) return value ?? null;
-  return value.replace(/[\u001b\u009b][[\]()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '').replace(/[\x00-\x1f\x7f]/g, '');
 }
 
 async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
@@ -246,13 +242,14 @@ export async function loginCommand(): Promise<number> {
       handoffCode: callback.handoffCode,
       sessionSecret,
     });
-    const workspaceName = sanitizeConsoleText(exchanged.workspaceName ?? callback.workspaceName ?? null);
+    const rawWorkspaceName = exchanged.workspaceName ?? callback.workspaceName ?? null;
+    const workspaceName = rawWorkspaceName == null ? null : safeLine(rawWorkspaceName);
     await saveCredentials({ token: exchanged.token, workspaceName, savedAt: new Date().toISOString() });
     console.log(`\n連携が完了しました。ワークスペース: ${workspaceName ?? '(不明)'}`);
     console.log('以降、NOTION_TOKEN を設定しなくても o2n コマンドがこの認証情報を自動的に使います。');
     return 0;
   } catch (err) {
-    console.error(`連携に失敗しました: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`連携に失敗しました: ${safeText(err instanceof Error ? err.message : String(err))}`);
     return 2;
   } finally {
     await localServer.close();
