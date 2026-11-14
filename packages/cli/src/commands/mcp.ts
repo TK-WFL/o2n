@@ -12,6 +12,7 @@ import {
   type McpSettings,
 } from '@tk_wfl/o2n-core';
 import { isInteractiveTerminal, promptHidden } from '../prompt.js';
+import { safeLine, safeText } from '../terminal.js';
 
 /**
  * `o2n mcp ...`：MCP サーバーの許可 vault・書き込み許可・確認フレーズを `~/.o2n/mcp-settings.json` に保存する（#170）。
@@ -70,19 +71,19 @@ export async function mcpAllowCommand(vaultPath: string, deps: Partial<McpComman
     resolved = await assertObsidianVault(vaultPath);
   } catch (err) {
     if (err instanceof NotAnObsidianVaultError) {
-      console.error(`${err.message}\nObsidian の vault（.obsidian フォルダがあるフォルダ）を指定してください。`);
+      console.error(`${safeText(err.message)}\nObsidian の vault（.obsidian フォルダがあるフォルダ）を指定してください。`);
       return 2;
     }
     throw err;
   }
   const settings = await current(d);
   if (settings.allowedVaults.includes(resolved)) {
-    console.log(`既に許可されています: ${resolved}`);
+    console.log(`既に許可されています: ${safeLine(resolved)}`);
     return 0;
   }
   settings.allowedVaults = [...settings.allowedVaults, resolved];
   await persist(d, settings);
-  console.log(`MCP サーバーからの読み取りを許可しました: ${resolved}`);
+  console.log(`MCP サーバーからの読み取りを許可しました: ${safeLine(resolved)}`);
   for (const n of envOverrideNote(d)) console.log(n);
   return 0;
 }
@@ -99,11 +100,11 @@ export async function mcpDisallowCommand(vaultPath: string, deps: Partial<McpCom
   }
   const remaining = settings.allowedVaults.filter((p) => !candidates.has(p));
   if (remaining.length === settings.allowedVaults.length) {
-    console.log(`許可リストにありません: ${vaultPath}`);
+    console.log(`許可リストにありません: ${safeLine(vaultPath)}`);
     return 1;
   }
   await persist(d, { ...settings, allowedVaults: remaining });
-  console.log(`許可を取り消しました: ${vaultPath}`);
+  console.log(`許可を取り消しました: ${safeLine(vaultPath)}`);
   return 0;
 }
 
@@ -163,7 +164,7 @@ export async function mcpStatusCommand(deps: Partial<McpCommandDeps> = {}): Prom
     console.log('  まだありません。');
   } else {
     console.log(`  許可する vault: ${file.allowedVaults.length === 0 ? 'なし' : ''}`);
-    for (const v of file.allowedVaults) console.log(`    - ${v}`);
+    for (const v of file.allowedVaults) console.log(`    - ${safeLine(v)}`);
     console.log(`  Notion への書き込み: ${file.writeEnabled ? '有効' : '無効'}`);
     console.log(`  確認フレーズ: ${file.writeConfirmationToken ? '設定済み' : '未設定'}`);
   }

@@ -1,8 +1,16 @@
 import { NotionApiError, NotionBlockLimitError } from '@tk_wfl/o2n-core';
+import { safeText } from './terminal.js';
 import { TokenMissingError } from './token.js';
 
-/** 利用者向けのエラー文。Notion API の典型的な失敗に対処法を添える（#116） */
+/**
+ * 利用者向けのエラー文。Notion API の典型的な失敗に対処法を添える（#116）。
+ * エラー文には vault のパスや Notion の応答が混ざるので、制御文字を除いて返す（#250）
+ */
 export function describeError(err: unknown): string {
+  return safeText(describe(err));
+}
+
+function describe(err: unknown): string {
   if (err instanceof TokenMissingError) return err.message;
   if (err instanceof NotionBlockLimitError) return err.message;
   if (err instanceof NotionApiError) {

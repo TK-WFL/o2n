@@ -1,6 +1,7 @@
 import { NotionApi, NotionClient, rateLimitFromEnv, saveCredentials } from '@tk_wfl/o2n-core';
 import { describeError } from '../errors.js';
 import { promptHidden } from '../prompt.js';
+import { safeLine } from '../terminal.js';
 
 /**
  * `o2n login --token`：個人アクセストークン（PAT）や internal integration のトークンを
@@ -23,11 +24,6 @@ export interface TokenLoginDeps {
 }
 
 const MAX_TOKEN_LENGTH = 512;
-
-function sanitizeConsoleText(value: string | null | undefined): string | null {
-  if (!value) return value ?? null;
-  return value.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
-}
 
 async function readStdinFirstLine(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -85,7 +81,7 @@ export async function loginWithTokenCommand(deps: Partial<TokenLoginDeps> = {}):
     return 2;
   }
 
-  const safeName = sanitizeConsoleText(workspaceName);
+  const safeName = workspaceName == null ? null : safeLine(workspaceName);
   await save({ token, workspaceName: safeName, savedAt: now().toISOString() });
   console.log(`トークンを保存しました${safeName ? `（ワークスペース: ${safeName}）` : ''}。`);
   console.log('以降、NOTION_TOKEN を設定しなくても o2n の CLI と MCP サーバーがこのトークンを使います。解除は `o2n logout`。');

@@ -20,6 +20,7 @@ import {
   noteConcurrencyFromEnv,
 } from '@tk_wfl/o2n-core';
 import { getToken } from '../token.js';
+import { safeLine, safeText } from '../terminal.js';
 
 export interface MigrateCommandOptions {
   /** 省略時は <vaultPath>/.o2n/plan.json */
@@ -37,7 +38,7 @@ export interface MigrateCommandOptions {
 export function progressPrinter(quiet: boolean): (done: number, total: number, notePath: string) => void {
   if (quiet) return () => undefined;
   if (process.stdout.isTTY) {
-    return (done, total, notePath) => process.stdout.write(`\r進捗: ${done}/${total} (${notePath})${' '.repeat(20)}`);
+    return (done, total, notePath) => process.stdout.write(`\r進捗: ${done}/${total} (${safeLine(notePath)})${' '.repeat(20)}`);
   }
   let lastBucket = -1;
   return (done, total) => {
@@ -62,7 +63,7 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
     plan = parseMigrationPlan(JSON.parse(raw));
   } catch (err) {
     const hint = opts.plan ? '' : '\n先に `o2n plan <vaultPath> --parent <NotionページID>` で計画を作成してください。';
-    console.error(`計画ファイルの読み込みに失敗しました: ${planOption}\n${String(err)}${hint}`);
+    console.error(`計画ファイルの読み込みに失敗しました: ${safeLine(planOption)}\n${safeText(String(err))}${hint}`);
     return 2;
   }
   if (opts.parent) plan.parentPageId = opts.parent;
@@ -108,14 +109,14 @@ export async function migrateCommand(vaultPath: string, opts: MigrateCommandOpti
 
   const failedCount = Object.values(state.snapshot.notes).filter((n) => n.status === 'failed').length;
   console.log(`\n成功: ${report.successCount}件 / 失敗: ${failedCount}件`);
-  console.log(`レポート: ${reportPath(vaultPath, dryRun)}`);
+  console.log(`レポート: ${safeLine(reportPath(vaultPath, dryRun))}`);
   if (wasAborted(entries)) {
     const aborted = entries.find((e) => e.category === 'aborted');
-    console.error(`\n⚠ ${aborted?.message ?? '移行を中断しました'}`);
+    console.error(`\n⚠ ${safeText(aborted?.message ?? '移行を中断しました')}`);
   }
 
   if (opts.verbose) {
-    for (const e of entries) console.log(`  [${e.category}] ${e.path}: ${e.message}`);
+    for (const e of entries) console.log(`  [${e.category}] ${safeLine(e.path)}: ${safeText(e.message)}`);
   }
 
   return failedCount > 0 || wasAborted(entries) ? 1 : 0;
