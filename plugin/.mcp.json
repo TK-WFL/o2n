@@ -1,8 +1,10 @@
 {
   "mcpServers": {
     "o2n": {
-      "command": "npx",
-      "args": ["-y", "@tk_wfl/o2n-mcp-server@0.8.0"],
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/node_modules/@tk_wfl/o2n-mcp-server/dist/index.js"
+      ],
       "env": {
         "NOTION_TOKEN": "${user_config.notion_token}",
         "O2N_ALLOWED_VAULTS": "${user_config.allowed_vaults}",

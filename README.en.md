@@ -160,10 +160,11 @@ In **Claude Code**, run:
 /plugin install o2n@o2n
 ```
 
-To try local changes, load a cloned folder directly:
+To try local changes, load a cloned folder directly. Claude Code does not install the plugin's dependencies for a folder loaded this way, so install them from the lockfile in `plugin/` first:
 
 ```bash
 git clone https://github.com/TK-WFL/o2n.git
+(cd o2n/plugin && npm ci --ignore-scripts)
 claude --plugin-dir ./o2n/plugin
 ```
 

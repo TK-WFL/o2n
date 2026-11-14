@@ -300,3 +300,14 @@ Cowork はプラグインの設定画面を出さないため、MCP サーバー
 - `mcp write off` の後は本実行を、`mcp disallow` の後は走査を拒否することも確認した。
 - Cowork 実機では未確認。Cowork のローカルセッションで、MCP サーバーの HOME が利用者のホームになる前提に立っている。
 - `mcp allow` と `mcp write on` は対話端末でしか受け付けない。ただし疑似端末（`script` や Python の `pty`）で回避できることを確認しているので、誤操作・自動実行を防ぐ歯止めであって防御境界ではない（SECURITY.md に記載）。
+
+## 25. プラグインの MCP サーバーはロックファイルで固定した依存から node で起動する（#257、2026-11-14）
+
+Claude のプラグインディレクトリに 0.7.3 を申請したところ、`npx -y @tk_wfl/o2n-mcp-server@<version>` に対して「Runs a pinned npx or uvx package」「Launcher lock missing」の警告が出た。npx は固定したパッケージの依存を起動のたびにレジストリから解決するので、推移的な依存までは固定できない。
+
+- `plugin/` に `package.json` と `package-lock.json`（lockfileVersion 3）を置いた。Claude Code はプラグインのルートにこの 2 つがあると、インストール・更新時にキャッシュへコピーしたプラグインの中へ `--ignore-scripts` で依存を入れる（[Node.js package dependencies](https://code.claude.com/docs/en/plugins/loading#node-js-package-dependencies)）。`overrides` があるとインストールしないので、プラグイン側には置いていない（ルートの `@hono/node-server` の下限は、ロックファイルを作り直した時点で 2.1.8 が入るので不要）。
+- `.mcp.json` は `node ${CLAUDE_PLUGIN_ROOT}/node_modules/@tk_wfl/o2n-mcp-server/dist/index.js` を起動する。起動時には何もダウンロードしない。
+- 確認方法：Claude Code 2.1.325 で `claude plugin validate ./plugin` が指摘なしで通ることと、git のマーケットプレイス（`git-subdir`）からインストールすると、キャッシュに `node_modules`（105 パッケージ）が入り、`claude mcp list` で `plugin:o2n:o2n` が Connected になることを確かめた。
+- `claude --plugin-dir` で直接読み込むときは依存が入らないので、先に `plugin/` で `npm ci --ignore-scripts` を実行する。
+- Cowork が同じように依存を入れるかは未確認（Cowork 実機での動作自体が未確認、24 を参照）。
+- ロックファイルは公開済みのバージョンからしか作れないため、プラグインのピン留めは npm 公開の後に別の PR（`scripts/pin-plugin.mjs`）で行い、`plugin-release` は **Release Claude plugin** ワークフローで進める（SECURITY.md の手順 8・9）。

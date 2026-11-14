@@ -16,7 +16,7 @@ The plugin starts a local MCP server on your computer, because it has to read yo
 | Cowork on your computer | Yes, after a one-time setup in a terminal. Cowork does not show the settings dialog, so save the settings with the commands under "Using it in Cowork". |
 | Chat on claude.ai, desktop and mobile | No. Chat does not start local MCP servers. |
 
-The MCP server needs Node.js 22 or later, because it is started with `npx`. The `o2n-cli` commands used for the Cowork setup below need Node.js 22.13 or later.
+The MCP server needs Node.js 22 or later and npm. When you install the plugin, Claude Code installs the server's npm packages from the plugin's `package-lock.json`, and then starts the server with `node`. The `o2n-cli` commands used for the Cowork setup below need Node.js 22.13 or later.
 
 ## Installing
 
@@ -30,7 +30,7 @@ The [o2n repository](https://github.com/TK-WFL/o2n) is also a plugin marketplace
 | Setting | What it does |
 |---|---|
 | Allowed vault paths | Absolute paths of the vaults o2n may read, separated by commas. Every other folder is refused. |
-| Notion token | A Notion personal access token, which is recommended, or an internal integration token. It is stored in your system's secure credential store. Leave it empty to use a token you saved with `npx @tk_wfl/o2n-cli login --token`. |
+| Notion token | A Notion personal access token, which is recommended, or an internal integration token. It is stored in your system's secure credential store. Leave it empty to use a token you saved with `npx @tk_wfl/o2n-cli@0.8.0 login --token`. |
 | Allow writing to Notion | Off by default. While it is off, o2n only scans, shows the plan and runs dry runs. Changing the plan and real migrations need writing allowed and the confirmation phrase. |
 | Confirmation phrase | At least 16 characters. A real migration starts only when Claude passes this exact phrase, so say it in chat only when you want the migration to run. |
 | Notion requests per second | 1 to 10, default 2. Keep 2 or 3 on Notion Free and Plus. |
@@ -44,9 +44,9 @@ If a setting is empty, o2n uses the value saved with the o2n command-line tool, 
 Cowork does not ask for the settings above. Run these commands once in a terminal on the same computer instead.
 
 ```bash
-npx @tk_wfl/o2n-cli login --token
-npx @tk_wfl/o2n-cli mcp allow /path/to/your/vault
-npx @tk_wfl/o2n-cli mcp write on
+npx @tk_wfl/o2n-cli@0.8.0 login --token
+npx @tk_wfl/o2n-cli@0.8.0 mcp allow /path/to/your/vault
+npx @tk_wfl/o2n-cli@0.8.0 mcp write on
 ```
 
 - `login --token` asks for your Notion token without showing it, checks it with Notion and saves it.
@@ -70,7 +70,8 @@ The tools are `scan_vault`, `get_plan`, `update_plan`, `prepare_migration`, `com
 
 ## What the plugin runs, reads, writes and sends
 
-- **Runs**: `npx -y @tk_wfl/o2n-mcp-server` at the exact version pinned in `.mcp.json`. npx downloads that package and its dependencies from the npm registry. The package is published from the public repository with npm provenance.
+- **Installs**: when you install or update the plugin, Claude Code installs `@tk_wfl/o2n-mcp-server` and its dependencies into the plugin folder from `package-lock.json`. The lockfile pins every package to an exact version from the npm registry with its integrity hash, and the install runs no package scripts. `@tk_wfl/o2n-mcp-server` is published from the public repository with npm provenance.
+- **Runs**: `node ${CLAUDE_PLUGIN_ROOT}/node_modules/@tk_wfl/o2n-mcp-server/dist/index.js`, the MCP server installed above. Nothing is downloaded when the server starts.
 - **Reads**:
   - Markdown notes and attachments inside the allowed vault paths.
   - `~/.o2n/credentials.json` when the Notion token setting is empty.

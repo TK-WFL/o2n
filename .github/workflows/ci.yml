@@ -23,6 +23,13 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm audit --omit=dev
+      # Claude プラグインの依存（plugin/package-lock.json）を Claude Code と同じ条件で入れ、
+      # MCP サーバーが起動することを確かめる（#257）
+      - run: npm ci --ignore-scripts --no-fund
+        working-directory: plugin
+      - run: npm audit
+        working-directory: plugin
+      - run: node scripts/smoke-plugin-server.mjs
       - run: npm ci
         working-directory: services/auth-proxy
       - run: npm run typecheck
