@@ -271,7 +271,7 @@ If 60%+ of a folder's direct notes share 3 or more frontmatter keys, o2n **sugge
 - The vault itself is **always read-only**; o2n writes only inside `.o2n/`
 - Only YAML frontmatter is parsed; `---js` / `---json` etc. skip just that note, safely
 - Symlinks inside the vault are never followed. `.o2n/` and `~/.o2n/` are read and written with symlink / hardlink / TOCTOU protections
-- `.o2n/state.json` is bound by signature to the vault, the plan and the Notion workspace, so mix-ups are detected
+- `.o2n/state.json` is bound by signature to the vault, the plan and the Notion workspace, so mix-ups are detected. `verify` checks the signature too, so run it on the machine that ran the migration
 - Hardened against ReDoS from malicious vaults
 - No network traffic other than the Notion API (no telemetry). npm packages are published via Trusted Publishing (OIDC) **with provenance**
 - The [privacy policy](PRIVACY.md) lists what o2n reads, sends and stores, and how to delete it

@@ -12,6 +12,23 @@ export interface VerifySummary {
   orphaned: Array<{ path: string; pageId?: string; pageUrl?: string }>;
 }
 
+/**
+ * Notion のページ URL として表示してよいか（#251）。state.json は vault の中にあり、署名を確かめられない
+ * 場合もあるので、Notion のドメイン（notion.so / notion.com とそのサブドメイン）の https だけを通す
+ */
+export function isNotionPageUrl(url: unknown): url is string {
+  if (typeof url !== 'string') return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return false;
+  const host = parsed.hostname;
+  return host === 'notion.so' || host.endsWith('.notion.so') || host === 'notion.com' || host.endsWith('.notion.com');
+}
+
 export function summarizeState(state: StateFile, inventory: VaultInventory): VerifySummary {
   const counts: VerifySummary['counts'] = { pending: 0, created: 0, linked: 0, attached: 0, done: 0, failed: 0, skipped: 0 };
   for (const s of Object.values(state.notes)) counts[s.status] = (counts[s.status] ?? 0) + 1;
@@ -19,7 +36,7 @@ export function summarizeState(state: StateFile, inventory: VaultInventory): Ver
   const present = new Set(inventory.notes.map((n) => n.path));
   const orphaned = Object.entries(state.notes)
     .filter(([p, n]) => !present.has(p) && n.status !== 'skipped')
-    .map(([p, n]) => ({ path: p, pageId: n.pageId, pageUrl: n.pageUrl }));
+    .map(([p, n]) => ({ path: p, pageId: n.pageId, pageUrl: isNotionPageUrl(n.pageUrl) ? n.pageUrl : undefined }));
   return { vaultNoteCount: inventory.notes.length, trackedNoteCount: Object.keys(state.notes).length, counts, untracked, orphaned };
 }
 

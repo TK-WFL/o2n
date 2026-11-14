@@ -124,6 +124,20 @@ describe('migrator 3パス統合テスト（モック）', () => {
     expect(client.callCount).toBeGreaterThan(0);
   });
 
+  it('dry-runの仮のID（ノートのパス入り）はIDの形式確認で弾かれず、リンク解決まで進む（#251）', async () => {
+    const { fetchImpl } = createMockServer();
+    const inventory = await scanVault(tmpDir);
+    const plan = buildPlan(inventory, { parentPageId: 'root-page' });
+    const client = new NotionClient({ token: 'test', dryRun: true, fetchImpl, rateLimit: { concurrency: 5, interval: 10, intervalCap: 5 } });
+    const state = await StateStore.load(tmpDir, 'root-page', { readOnly: true });
+
+    const report = await runMigration({ vaultPath: tmpDir, plan, inventory, api: new NotionApi(client), state, dryRun: true });
+
+    expect(state.getNote('Root.md')?.pageId).toBe('dry-run-Root.md');
+    expect(report.filter((e) => e.category === 'warning')).toEqual([]);
+    expect(state.getNote('Root.md')?.error).toBeUndefined();
+  });
+
   it('dry-runはstate.jsonをディスクに書き込まず、後続の本実行の判定を汚染しない（回帰テスト）', async () => {
     const { fetchImpl, calls } = createMockServer();
     const inventory = await scanVault(tmpDir);

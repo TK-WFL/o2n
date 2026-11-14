@@ -50,6 +50,24 @@ export class NotionApiError extends Error {
   }
 }
 
+/** API のパスに埋め込めない値を ID として渡された（#251） */
+export class InvalidNotionIdError extends Error {
+  constructor(id: unknown) {
+    super(`Notion の ID として使えない値です: ${JSON.stringify(String(id).slice(0, 60))}`);
+    this.name = 'InvalidNotionIdError';
+  }
+}
+
+/**
+ * API のパスに埋め込む ID を確かめる（#251）。Notion の ID は UUID（ハイフンあり・なし）なので、
+ * 英数字とハイフンだけを通す。`/`、`.`、`?`、`#`、`%` を含む値をそのまま埋め込むと、state.json などに
+ * 書かれた値で別のエンドポイントへのリクエストを組み立てられる。合わない値はリクエストを送らずに断る
+ */
+function idSegment(id: string): string {
+  if (typeof id !== 'string' || !/^[A-Za-z0-9-]+$/.test(id)) throw new InvalidNotionIdError(id);
+  return id;
+}
+
 /**
  * Notion Free プラン（複数メンバー）のワークスペース生涯ブロック上限（1,000）に達した。
  * 2026-09-01 から REST API でも強制され、作成系リクエストは
@@ -314,6 +332,14 @@ export type MarkdownUpdateBody =
 export class NotionApi {
   constructor(private readonly client: NotionClient) {}
 
+  /**
+   * パスに埋め込む ID（#251）。dry-run ではリクエストを送らず、ID もノートのパスから作った仮の値
+   * （`dry-run-<パス>`）なので、形式は確かめない
+   */
+  private id(value: string): string {
+    return this.client.dryRun ? value : idSegment(value);
+  }
+
   get callCount(): number {
     return this.client.callCount;
   }
@@ -339,7 +365,7 @@ export class NotionApi {
     properties: Record<string, unknown>,
     extra: { icon?: PageIcon; cover?: PageCover } = {},
   ): Promise<{ id: string; url: string }> {
-    return this.client.request({ method: 'PATCH', path: `/pages/${pageId}`, body: { properties, ...extra } });
+    return this.client.request({ method: 'PATCH', path: `/pages/${this.id(pageId)}`, body: { properties, ...extra } });
   }
 
   /** ページを別の親へ移動する（Move page API、2026-01）。親はページまたはデータソース */
@@ -347,15 +373,15 @@ export class NotionApi {
     pageId: string,
     parent: { type: 'page_id'; page_id: string } | { type: 'data_source_id'; data_source_id: string },
   ): Promise<{ id: string }> {
-    return this.client.request({ method: 'POST', path: `/pages/${pageId}/move`, body: { parent } });
+    return this.client.request({ method: 'POST', path: `/pages/${this.id(pageId)}/move`, body: { parent } });
   }
 
   async getPage(pageId: string): Promise<{ id: string; in_trash?: boolean; url?: string }> {
-    return this.client.request({ method: 'GET', path: `/pages/${pageId}` });
+    return this.client.request({ method: 'GET', path: `/pages/${this.id(pageId)}` });
   }
 
   async getPageMarkdown(pageId: string): Promise<{ markdown: string; unknown_block_ids?: string[] }> {
-    return this.client.request({ method: 'GET', path: `/pages/${pageId}/markdown` });
+    return this.client.request({ method: 'GET', path: `/pages/${this.id(pageId)}/markdown` });
   }
 
   async updatePageMarkdown(
@@ -365,7 +391,7 @@ export class NotionApi {
   ): Promise<{ task_id?: string; poll_after_seconds?: number }> {
     return this.client.request({
       method: 'PATCH',
-      path: `/pages/${pageId}/markdown`,
+      path: `/pages/${this.id(pageId)}/markdown`,
       query: allowAsync ? { allow_async: 'true' } : undefined,
       body,
     });
@@ -387,7 +413,7 @@ export class NotionApi {
   async sendFileUpload(fileUploadId: string, formData: FormData): Promise<{ id: string; status: string }> {
     return this.client.requestRaw({
       method: 'POST',
-      path: `/file_uploads/${fileUploadId}/send`,
+      path: `/file_uploads/${this.id(fileUploadId)}/send`,
       body: formData,
     });
   }
@@ -397,7 +423,7 @@ export class NotionApi {
    * 完了しない（公式ガイド "Sending larger files"）。single_partでは不要。
    */
   async completeFileUpload(fileUploadId: string): Promise<{ id: string; status: string }> {
-    return this.client.request({ method: 'POST', path: `/file_uploads/${fileUploadId}/complete` });
+    return this.client.request({ method: 'POST', path: `/file_uploads/${this.id(fileUploadId)}/complete` });
   }
 
   /**
@@ -407,7 +433,7 @@ export class NotionApi {
   async appendBlockChildren(blockId: string, children: unknown[], afterBlockId?: string): Promise<{ results: Array<{ id: string }> }> {
     return this.client.request({
       method: 'PATCH',
-      path: `/blocks/${blockId}/children`,
+      path: `/blocks/${this.id(blockId)}/children`,
       body: {
         children,
         ...(afterBlockId ? { position: { type: 'after_block', after_block: { id: afterBlockId } } } : {}),
@@ -417,11 +443,11 @@ export class NotionApi {
 
   /** ブロックの本文（rich_text 等）を更新する。type ごとのキー（paragraph 等）は呼び出し側が組み立てる */
   async updateBlock(blockId: string, body: Record<string, unknown>): Promise<NotionBlock> {
-    return this.client.request({ method: 'PATCH', path: `/blocks/${blockId}`, body });
+    return this.client.request({ method: 'PATCH', path: `/blocks/${this.id(blockId)}`, body });
   }
 
   async deleteBlock(blockId: string): Promise<void> {
-    await this.client.request({ method: 'DELETE', path: `/blocks/${blockId}` });
+    await this.client.request({ method: 'DELETE', path: `/blocks/${this.id(blockId)}` });
   }
 
   async getBlockChildren(
@@ -430,7 +456,7 @@ export class NotionApi {
   ): Promise<{ results: NotionBlock[]; has_more?: boolean; next_cursor?: string | null }> {
     return this.client.request({
       method: 'GET',
-      path: `/blocks/${blockId}/children`,
+      path: `/blocks/${this.id(blockId)}/children`,
       query: { page_size: '100', start_cursor: startCursor },
     });
   }

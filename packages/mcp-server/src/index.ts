@@ -12,6 +12,8 @@ import {
   NotionClient,
   NotionApi,
   StateStore,
+  StateIntegrityError,
+  loadStateForVerify,
   writeReport,
   reportFileName,
   buildReport,
@@ -440,15 +442,18 @@ server.tool(
   async ({ vaultPath, deep }) => {
     const guard = await guardVaultPath(vaultPath);
     if (guard.error) return guard.error;
+    // state.json は vault の中にあるので、スキーマと（署名鍵があれば）署名を確かめてから使う（#251）
     let state: StateFile;
+    let signatureChecked: boolean;
     try {
-      state = JSON.parse(await readVaultStateFile(guard.vaultPath, 'state.json')) as StateFile;
+      ({ state, signatureChecked } = await loadStateForVerify(guard.vaultPath));
     } catch (error) {
+      if (error instanceof StateIntegrityError) return errorText(error.message);
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       return errorText('state.json がありません。先に移行を実行してください。');
     }
     const inventory = await scanVault(guard.vaultPath);
-    const summary = summarizeState(state, inventory);
+    const summary = { ...summarizeState(state, inventory), stateSignatureChecked: signatureChecked };
     if (!deep) return text(JSON.stringify(summary, null, 2));
 
     const token = await notionTokenFor(false);

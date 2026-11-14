@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NotionApi, NotionClient } from '../notion-client.js';
-import { deepVerifyNotes, summarizeState } from '../verify.js';
+import { deepVerifyNotes, isNotionPageUrl, summarizeState } from '../verify.js';
 import type { StateFile, VaultInventory } from '../types.js';
 
 function stateWith(notes: StateFile['notes']): StateFile {
@@ -128,5 +128,66 @@ describe('vault から削除されたノート（#115）', () => {
     const { api } = mockApi({ p2: 'still here', p3: { trash: true }, p4: 404 });
     const result = await deepVerifyNotes(api, stateWith({}), { orphaned: [{ path: 'g2.md', pageId: 'p2' }, { path: 'g3.md', pageId: 'p3' }, { path: 'g4.md', pageId: 'p4' }] });
     expect(result.issues).toEqual([expect.objectContaining({ path: 'g2.md', kind: 'page_orphaned' })]);
+  });
+});
+
+describe('細工した state への耐性（#251）', () => {
+  it('pageId にパスを書いても、その場所へのリクエストは送らず fetch_error として報告する', async () => {
+    const { api, calls } = mockApi({ p1: '# A' });
+    const result = await deepVerifyNotes(
+      api,
+      stateWith({
+        'ok.md': { status: 'done', pageId: 'p1' },
+        'evil.md': { status: 'done', pageId: '../users/me' },
+        'evil2.md': { status: 'done', pageId: 'p1/../../search?query=x' },
+      }),
+      { orphaned: [{ path: 'gone.md', pageId: '../../v1/users' }] },
+    );
+    expect(calls).toEqual(['p1', 'p1:md']);
+    expect(result.issues.map((i) => [i.path, i.kind])).toEqual([
+      ['gone.md', 'fetch_error'],
+      ['evil.md', 'fetch_error'],
+      ['evil2.md', 'fetch_error'],
+    ]);
+  });
+
+  it('isNotionPageUrl は Notion のドメインの https だけを通す', () => {
+    for (const ok of [
+      'https://www.notion.so/My-Page-1f2e3d4c5b6a7980a1b2c3d4e5f60718',
+      'https://notion.so/1f2e3d4c5b6a7980a1b2c3d4e5f60718',
+      'https://app.notion.com/p/1f2e3d4c5b6a7980a1b2c3d4e5f60718',
+    ]) {
+      expect(isNotionPageUrl(ok)).toBe(true);
+    }
+    for (const bad of [
+      'https://example.invalid/www.notion.so/x',
+      'https://www.notion.so.example.invalid/x',
+      'https://evilnotion.so/x',
+      'https://www.notion.so@example.invalid/x',
+      'https://user:pass@www.notion.so/x',
+      'http://www.notion.so/x',
+      'javascript:alert(1)',
+      'file:///etc/passwd',
+      'www.notion.so/x',
+      '',
+      undefined,
+      42,
+    ]) {
+      expect(isNotionPageUrl(bad)).toBe(false);
+    }
+  });
+
+  it('summarizeState は Notion 以外の pageUrl を出さない', () => {
+    const s = summarizeState(
+      stateWith({
+        'gone1.md': { status: 'done', pageId: 'p1', pageUrl: 'https://www.notion.so/p1' },
+        'gone2.md': { status: 'done', pageId: 'p2', pageUrl: 'https://example.invalid/login' },
+      }),
+      inventoryWith([]),
+    );
+    expect(s.orphaned).toEqual([
+      { path: 'gone1.md', pageId: 'p1', pageUrl: 'https://www.notion.so/p1' },
+      { path: 'gone2.md', pageId: 'p2', pageUrl: undefined },
+    ]);
   });
 });

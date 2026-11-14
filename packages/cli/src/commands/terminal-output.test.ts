@@ -156,6 +156,7 @@ describe('vault 由来の文字列を端末に出すときは制御文字を除�
     printed = [];
     await verifyCommand(vaultPath, { json: true });
     expect(output()).not.toMatch(FORBIDDEN);
-    expect((JSON.parse(output()) as { untracked: string[] }).untracked).toContain(EVIL_NOTE);
+    // 署名鍵の無い端末なので、署名を確認していない旨の注意（標準エラー）が JSON（標準出力）の前に出る
+    expect((JSON.parse(printed.at(-1) ?? '') as { untracked: string[] }).untracked).toContain(EVIL_NOTE);
   });
 });
