@@ -1,9 +1,10 @@
 import {
   NotionApi,
   NotionClient,
+  StateIntegrityError,
   deepVerifyNotes,
+  loadStateForVerify,
   rateLimitFromEnv,
-  readVaultStateFile,
   scanVault,
   summarizeState,
   type StateFile,
@@ -19,13 +20,23 @@ export interface VerifyCommandOptions {
 }
 
 export async function verifyCommand(vaultPath: string, opts: VerifyCommandOptions = {}): Promise<number> {
+  // state.json は vault の中にあり、受け取った vault に最初から入っていることもある。
+  // スキーマと（署名鍵があれば）署名を確かめてから使う（#251）
   let state: StateFile;
+  let signatureChecked: boolean;
   try {
-    state = JSON.parse(await readVaultStateFile(vaultPath, 'state.json')) as StateFile;
+    ({ state, signatureChecked } = await loadStateForVerify(vaultPath));
   } catch (error) {
+    if (error instanceof StateIntegrityError) {
+      console.error(error.message);
+      return 2;
+    }
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     console.error('state.jsonが見つかりません。先に migrate を実行してください。');
     return 2;
+  }
+  if (!signatureChecked) {
+    console.error('注意: この端末には署名鍵が無いため、state.json の署名は確認していません（別の端末で移行した場合など）。');
   }
 
   const inventory = await scanVault(vaultPath);
@@ -39,7 +50,7 @@ export async function verifyCommand(vaultPath: string, opts: VerifyCommandOption
       const api = new NotionApi(new NotionClient({ token, dryRun: false, rateLimit: rateLimitFromEnv() }));
       deep = await deepVerifyNotes(api, state, { orphaned: summary.orphaned });
     }
-    console.log(safeJson({ ...summary, deep }));
+    console.log(safeJson({ ...summary, stateSignatureChecked: signatureChecked, deep }));
     const deepCount = (deep as { issues?: unknown[] } | undefined)?.issues?.length ?? 0;
     return c.failed > 0 || summary.untracked.length > 0 || deepCount > 0 ? 1 : 0;
   }

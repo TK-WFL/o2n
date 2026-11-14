@@ -272,7 +272,7 @@ Claude Desktop / Claude Code の MCP 設定に `npx -y @tk_wfl/o2n-mcp-server` �
 - vault 本体は **常に読み取り専用**。書き込むのは `.o2n/` ディレクトリのみ
 - frontmatter は YAML のみ受け付け、`---js` / `---json` などはそのノートだけを安全にスキップ
 - vault 内のシンボリックリンクは辿らない。`.o2n/` と `~/.o2n/` は symlink / hardlink / TOCTOU 攻撃を防ぐ形で読み書き
-- `.o2n/state.json` は vault・計画・Notion ワークスペースに署名で結合され、取り違えを検知
+- `.o2n/state.json` は vault・計画・Notion ワークスペースに署名で結合され、取り違えを検知。`verify` も署名を確かめるので、移行を実行した端末で実行する
 - 悪意のある vault で処理をハングさせる ReDoS への対策済み
 - Notion API 以外への通信なし（テレメトリなし）。npm パッケージは Trusted Publishing（OIDC）で **provenance 付き**で公開
 - 何を読み・送り・保存するか、その消し方は [プライバシーポリシー](PRIVACY.md) にまとめています

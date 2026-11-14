@@ -2,7 +2,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StateIntegrityError, StateStore, planHash, statePath } from '../state.js';
+import { StateIntegrityError, StateStore, loadStateForVerify, planHash, statePath } from '../state.js';
+import { atomicWriteVaultStateFile } from '../local-state-io.js';
 
 let tmpDir: string;
 
@@ -100,5 +101,79 @@ describe('state.json の書き込みまとめ（#111）', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('verify 用の state 読み込み（#251）', () => {
+  let vault: string;
+  let home: string;
+
+  beforeEach(async () => {
+    vault = path.join(tmpDir, 'vault');
+    home = path.join(tmpDir, 'home');
+    await fs.mkdir(vault);
+    await fs.mkdir(home, { mode: 0o700 });
+    vi.spyOn(os, 'homedir').mockReturnValue(home);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** この端末で移行した状態を作る（署名鍵と署名済みの state.json ができる） */
+  async function migrateOnce(): Promise<void> {
+    const store = await StateStore.load(vault, 'root-page');
+    await store.setNote('Note.md', { status: 'done', pageId: 'page-123', pageUrl: 'https://www.notion.so/page-123' });
+    await store.flush();
+  }
+
+  it('この端末で署名した state はそのまま読める', async () => {
+    await migrateOnce();
+    const { state, signatureChecked } = await loadStateForVerify(vault);
+    expect(signatureChecked).toBe(true);
+    expect(state.notes['Note.md']?.pageId).toBe('page-123');
+  });
+
+  it('署名後に書き換えられた state は使わない', async () => {
+    await migrateOnce();
+    const parsed = JSON.parse(await fs.readFile(statePath(vault), 'utf-8'));
+    parsed.notes['Note.md'].pageId = '../users/me';
+    await fs.writeFile(statePath(vault), JSON.stringify(parsed), 'utf-8');
+    await expect(loadStateForVerify(vault)).rejects.toBeInstanceOf(StateIntegrityError);
+  });
+
+  it('署名鍵がある端末では、署名の無い state（旧形式、署名欄を消したもの）は使わない', async () => {
+    await migrateOnce();
+    const signed = JSON.parse(await fs.readFile(statePath(vault), 'utf-8'));
+    const { signature, ...unsigned } = signed;
+    void signature;
+    for (const crafted of [unsigned, { ...unsigned, version: 1 }, { version: 1, parentPageId: 'x', notes: {}, files: {} }]) {
+      await fs.writeFile(statePath(vault), JSON.stringify(crafted), 'utf-8');
+      await expect(loadStateForVerify(vault)).rejects.toBeInstanceOf(StateIntegrityError);
+    }
+  });
+
+  it('署名鍵が無い端末では、スキーマだけ確かめて signatureChecked: false を返す。鍵は作らない', async () => {
+    const crafted = { version: 2, parentPageId: 'root-page', notes: { 'a.md': { status: 'done', pageId: 'p1' } }, files: {}, folders: {} };
+    await atomicWriteVaultStateFile(vault, 'state.json', JSON.stringify(crafted));
+    const { state, signatureChecked } = await loadStateForVerify(vault);
+    expect(signatureChecked).toBe(false);
+    expect(state.notes['a.md']?.pageId).toBe('p1');
+    await expect(fs.access(path.join(home, '.o2n', 'state-signing-key'))).rejects.toThrow();
+  });
+
+  it('スキーマに合わない state、JSON として読めない state は使わない', async () => {
+    for (const raw of [
+      JSON.stringify({ version: 2, parentPageId: 'root-page', notes: { 'a.md': { status: 'done', pageId: 42 } }, files: {} }),
+      JSON.stringify({ version: 2, parentPageId: 'root-page', notes: [], files: {} }),
+      '{"version": 2,',
+    ]) {
+      await atomicWriteVaultStateFile(vault, 'state.json', raw);
+      await expect(loadStateForVerify(vault)).rejects.toBeInstanceOf(StateIntegrityError);
+    }
+  });
+
+  it('state.json が無いときは ENOENT のまま', async () => {
+    await expect(loadStateForVerify(vault)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

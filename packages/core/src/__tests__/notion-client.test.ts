@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NotionApiError, NotionBlockLimitError, NotionClient } from '../notion-client.js';
+import { InvalidNotionIdError, NotionApi, NotionApiError, NotionBlockLimitError, NotionClient } from '../notion-client.js';
 
 interface Recorded {
   url: string;
@@ -115,5 +115,43 @@ describe('NotionClient: Free プランのブロック上限（#70）', () => {
     const err = await client(fetchImpl).request({ method: 'POST', path: '/pages', body: {} }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(NotionApiError);
     expect(err).not.toBeInstanceOf(NotionBlockLimitError);
+  });
+});
+
+describe('NotionApi: パスに埋め込む ID の形式（#251）', () => {
+  const BAD_IDS = ['../users/me', 'a/b', '..', 'a.b', 'a?x=1', 'a#b', 'a%2e%2e', 'a b', 'a\n', '\u001b[2J', 'ａ', ''];
+
+  it.each(BAD_IDS)('英数字とハイフン以外を含む ID %j はリクエストを送らずに断る', async (id) => {
+    const { fetchImpl, calls } = fetchSequence([() => json({})]);
+    const api = new NotionApi(client(fetchImpl));
+    const attempts = [
+      () => api.getPage(id),
+      () => api.getPageMarkdown(id),
+      () => api.updatePageProperties(id, {}),
+      () => api.updatePageMarkdown(id, { type: 'replace_content', replace_content: { new_str: '' } }),
+      () => api.movePage(id, { type: 'page_id', page_id: 'p' }),
+      () => api.sendFileUpload(id, new FormData()),
+      () => api.completeFileUpload(id),
+      () => api.appendBlockChildren(id, []),
+      () => api.updateBlock(id, {}),
+      () => api.deleteBlock(id),
+      () => api.getBlockChildren(id),
+      () => api.listAllBlockChildren(id),
+    ];
+    for (const attempt of attempts) {
+      await expect(attempt()).rejects.toBeInstanceOf(InvalidNotionIdError);
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it('UUID（ハイフンあり・なし）はそのまま送る', async () => {
+    const { fetchImpl, calls } = fetchSequence([() => json({ id: 'x' })]);
+    const api = new NotionApi(client(fetchImpl));
+    await api.getPage('1f2e3d4c-5b6a-7980-a1b2-c3d4e5f60718');
+    await api.getPageMarkdown('1f2e3d4c5b6a7980a1b2c3d4e5f60718');
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual([
+      '/v1/pages/1f2e3d4c-5b6a-7980-a1b2-c3d4e5f60718',
+      '/v1/pages/1f2e3d4c5b6a7980a1b2c3d4e5f60718/markdown',
+    ]);
   });
 });

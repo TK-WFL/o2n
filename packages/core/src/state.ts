@@ -214,6 +214,35 @@ export class StateStore {
   }
 }
 
+/**
+ * verify 用に state.json を読む（#251）。読み取りだけなので鍵も state も作らない。
+ *
+ * - スキーマは必ず確かめる
+ * - この端末に署名鍵があれば、署名も確かめる。署名の無い旧形式や、署名の合わない state は使わない
+ *   （migrate / resume と同じ扱い）
+ * - 署名鍵が無い端末では確かめようがないので、signatureChecked: false を返して呼び出し側に知らせる
+ *
+ * migrate と違い、計画やトークンが無くても動かすので、parentPageId・planHash・ワークスペースは照合しない。
+ * state.json が無いときは ENOENT をそのまま投げる
+ */
+export async function loadStateForVerify(vaultPath: string): Promise<{ state: StateFile; signatureChecked: boolean }> {
+  const raw = await readVaultStateFile(vaultPath, 'state.json');
+  let state: StateFile;
+  try {
+    state = parseStateFile(JSON.parse(raw));
+  } catch {
+    throw new StateIntegrityError('state.json の形式が正しくないため、検証を中止しました。');
+  }
+  const signingKey = await loadOrCreateSigningKey(true);
+  if (!signingKey) return { state, signatureChecked: false };
+  if (state.version !== 2 || !state.signature || state.signature !== signState(state, signingKey)) {
+    throw new StateIntegrityError(
+      'state.json の署名を確認できないため、検証を中止しました。別の端末や古いバージョンで作られたか、書き換えられた可能性があります。移行を実行した端末で verify を実行してください。',
+    );
+  }
+  return { state, signatureChecked: true };
+}
+
 function validateStateBinding(
   data: StateFile,
   opts: {
