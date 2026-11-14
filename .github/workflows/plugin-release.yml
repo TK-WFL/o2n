@@ -1,0 +1,59 @@
+name: Release Claude plugin
+
+# Anthropic のプラグインディレクトリは plugin-release ブランチを追従する（#165）。
+# plugin/ は npm に公開済みの @tk_wfl/o2n-mcp-server をロックファイルで固定しているので（#257）、
+# 公開 → scripts/pin-plugin.mjs のピン留め PR のマージ → このワークフロー、の順に進める。
+# ロックファイルから Claude Code と同じ条件（--ignore-scripts）で依存を入れ、サーバーが起動することを
+# 確かめてから、plugin-release を main のコミットへ早送りする。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+      - name: Install the plugin's locked packages the way Claude Code does
+        run: npm ci --ignore-scripts --no-fund
+        working-directory: plugin
+      - run: npm audit
+        working-directory: plugin
+      - name: Start the plugin's MCP server
+        run: node scripts/smoke-plugin-server.mjs
+
+  advance:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Advance plugin-release branch
+        # force=false なので早送りのみ（古いコミットへ戻すことはない）
+        run: |
+          ref="heads/plugin-release"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/$ref" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/$ref" -f sha="$GITHUB_SHA" -F force=false >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/$ref" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          echo "plugin-release -> $GITHUB_SHA"
