@@ -41,6 +41,24 @@ describe('Claude plugin manifest (#165)', () => {
     expect(server.args).toEqual(['-y', `@tk_wfl/o2n-mcp-server@${pkg.version}`]);
   });
 
+  it('plugin/ に package.json やロックファイルを置かない（#259）', async () => {
+    // ロックファイルからの依存インストールは、ディレクトリが Verified 組織からしか受け付けない
+    for (const file of ['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'bun.lock', 'bun.lockb', '.npmrc']) {
+      await expect(fs.access(path.join(pluginRoot, file)), file).rejects.toThrow();
+    }
+  });
+
+  it('プラグインの説明に書く npx のコマンドは、プラグインと同じ完全なバージョンで固定する', async () => {
+    const manifest = await readJson<PluginManifest>(path.join(pluginRoot, '.claude-plugin', 'plugin.json'));
+    const texts = [
+      await fs.readFile(path.join(pluginRoot, 'README.md'), 'utf-8'),
+      await fs.readFile(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf-8'),
+    ];
+    const launches = texts.flatMap((t) => [...t.matchAll(/npx\s+(?:-y\s+)?(@tk_wfl\/[a-z0-9-]+)(@[^\s`"]+)?/g)]);
+    expect(launches.length).toBeGreaterThan(0);
+    for (const m of launches) expect(m[0]).toBe(`${m[0].slice(0, m[0].indexOf(m[1]))}${m[1]}@${manifest.version}`);
+  });
+
   it('.mcp.json が参照する設定はすべて userConfig に既定値つきで宣言されている', async () => {
     const manifest = await readJson<PluginManifest>(path.join(pluginRoot, '.claude-plugin', 'plugin.json'));
     const mcp = await readJson<McpConfig>(path.join(pluginRoot, '.mcp.json'));
