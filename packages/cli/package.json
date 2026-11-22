@@ -36,14 +36,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@inquirer/prompts": "^8.8.0",
     "@tk_wfl/o2n-core": "^0.8.0",
-    "@inquirer/prompts": "^8.7.4",
     "commander": "^15.0.0"
   },
   "devDependencies": {
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": "^22.22.2 || ^24.15.0 || >=26"
   }
 }
